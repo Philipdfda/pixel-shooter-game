@@ -41,6 +41,8 @@ const ENEMY_HEALTH_BAR_HEIGHT = 5;
 const MINI_BOSS_SCALE = 0.9;
 const MINI_BOSS_BODY_RADIUS = 25;
 const MINI_BOSS_BODY_OFFSET = 7;
+const TOUCH_BUTTON_SIZE = 74;
+const TOUCH_BUTTON_GAP = 18;
 const BULLET_SPEED = 590;
 const STARTING_FIRE_COOLDOWN_MS = 220;
 const MIN_FIRE_COOLDOWN_MS = 70;
@@ -74,6 +76,10 @@ class GameScene extends Phaser.Scene {
     this.isPaused = false;
     this.bossFrozen = false;
     this.finalBossHealth = FINAL_BOSS_MAX_HEALTH;
+    this.touchUpDown = false;
+    this.touchDownDown = false;
+    this.touchLeftDown = false;
+    this.touchRightDown = false;
 
     this.events.once("shutdown", () => this.clearSpawnTimer());
 
@@ -90,6 +96,7 @@ class GameScene extends Phaser.Scene {
     this.createPauseScreen();
     this.createEndScreen();
     this.createControls();
+    this.createTouchControls();
     this.createCollisions();
 
     this.input.setDefaultCursor("none");
@@ -115,6 +122,8 @@ class GameScene extends Phaser.Scene {
       this.togglePause();
     }
 
+    this.updateTouchControlsVisibility();
+
     if (this.isPaused) return;
 
     if (Phaser.Input.Keyboard.JustDown(this.skipKey)) {
@@ -132,7 +141,9 @@ class GameScene extends Phaser.Scene {
     }
 
     this.updatePlayer();
-    this.updateAiming();
+    if (!this.isTouchMovePressed()) {
+      this.updateAiming();
+    }
     this.recycleOldBullets(time);
 
     if (this.gameState === "playing") {
@@ -146,7 +157,7 @@ class GameScene extends Phaser.Scene {
       this.updateBossCountdown(time);
     }
 
-    if (this.input.activePointer.isDown) {
+    if (this.input.activePointer.isDown && !this.isTouchMovePressed()) {
       this.tryShoot(time);
     }
   }
@@ -543,6 +554,93 @@ class GameScene extends Phaser.Scene {
     this.skipKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N);
   }
 
+  createTouchControls() {
+    const baseX = 54;
+    const topY = GAME_HEIGHT - 202;
+    const bottomY = GAME_HEIGHT - 110;
+    const centerX = baseX + TOUCH_BUTTON_SIZE + TOUCH_BUTTON_GAP;
+    this.touchButtons = [
+      this.createMoveTouchButton(centerX, topY, "^", "up"),
+      this.createMoveTouchButton(baseX, bottomY, "<", "left"),
+      this.createMoveTouchButton(centerX, bottomY, "v", "down"),
+      this.createMoveTouchButton(centerX + TOUCH_BUTTON_SIZE + TOUCH_BUTTON_GAP, bottomY, ">", "right")
+    ];
+    this.updateTouchControlsVisibility();
+  }
+
+  createMoveTouchButton(x, y, label, direction) {
+    const button = this.add.rectangle(
+      x,
+      y,
+      TOUCH_BUTTON_SIZE,
+      TOUCH_BUTTON_SIZE,
+      0x11161d,
+      0.58
+    )
+      .setOrigin(0)
+      .setStrokeStyle(3, 0x16c9f4, 0.92)
+      .setDepth(14)
+      .setScrollFactor(0)
+      .setInteractive({ useHandCursor: true });
+
+    const text = this.add.text(x + TOUCH_BUTTON_SIZE / 2, y + TOUCH_BUTTON_SIZE / 2 - 2, label, {
+      fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+      fontSize: "52px",
+      color: "#f4fbff",
+      stroke: "#080a0f",
+      strokeThickness: 4
+    }).setOrigin(0.5).setDepth(15).setScrollFactor(0);
+
+    const setPressed = (pressed, event) => {
+      if (event) event.stopPropagation();
+      if (direction === "up") {
+        this.touchUpDown = pressed;
+      } else if (direction === "down") {
+        this.touchDownDown = pressed;
+      } else if (direction === "left") {
+        this.touchLeftDown = pressed;
+      } else {
+        this.touchRightDown = pressed;
+      }
+      button.setFillStyle(pressed ? 0x16c9f4 : 0x11161d, pressed ? 0.78 : 0.58);
+    };
+
+    button.on("pointerdown", (_pointer, _localX, _localY, event) => setPressed(true, event));
+    button.on("pointerup", (_pointer, _localX, _localY, event) => setPressed(false, event));
+    button.on("pointerout", (_pointer, event) => setPressed(false, event));
+    button.on("pointerupoutside", (_pointer, event) => setPressed(false, event));
+
+    return { button, text, direction };
+  }
+
+  updateTouchControlsVisibility() {
+    if (!this.touchButtons) return;
+    const visible = !this.isPaused && ["playing", "miniboss", "boss"].includes(this.gameState);
+    if (!visible) {
+      this.touchUpDown = false;
+      this.touchDownDown = false;
+      this.touchLeftDown = false;
+      this.touchRightDown = false;
+    }
+    this.touchButtons.forEach(({ button, text, direction }) => {
+      const pressed = this.isTouchDirectionPressed(direction);
+      button.setFillStyle(pressed ? 0x16c9f4 : 0x11161d, pressed ? 0.78 : 0.58);
+      button.setVisible(visible);
+      text.setVisible(visible);
+    });
+  }
+
+  isTouchDirectionPressed(direction) {
+    if (direction === "up") return this.touchUpDown;
+    if (direction === "down") return this.touchDownDown;
+    if (direction === "left") return this.touchLeftDown;
+    return this.touchRightDown;
+  }
+
+  isTouchMovePressed() {
+    return this.touchUpDown || this.touchDownDown || this.touchLeftDown || this.touchRightDown;
+  }
+
   createCollisions() {
     this.physics.add.overlap(this.bullets, this.enemies, this.hitEnemy, null, this);
     this.physics.add.overlap(this.bullets, this.miniBoss, this.hitMiniBoss, null, this);
@@ -838,10 +936,10 @@ class GameScene extends Phaser.Scene {
   updatePlayer() {
     const movement = new Phaser.Math.Vector2(0, 0);
 
-    if (this.keys.left.isDown) movement.x -= 1;
-    if (this.keys.right.isDown) movement.x += 1;
-    if (this.keys.up.isDown) movement.y -= 1;
-    if (this.keys.down.isDown) movement.y += 1;
+    if (this.keys.left.isDown || this.touchLeftDown) movement.x -= 1;
+    if (this.keys.right.isDown || this.touchRightDown) movement.x += 1;
+    if (this.keys.up.isDown || this.touchUpDown) movement.y -= 1;
+    if (this.keys.down.isDown || this.touchDownDown) movement.y += 1;
 
     movement.normalize().scale(PLAYER_SPEED);
     this.player.setVelocity(movement.x, movement.y);
