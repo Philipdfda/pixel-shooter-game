@@ -1,5 +1,5 @@
-const GAME_WIDTH = 960;
-const GAME_HEIGHT = 540;
+const GAME_WIDTH = 1280;
+const GAME_HEIGHT = 720;
 
 const LEVEL_ENEMY_COUNTS = [8, 16, 32, 64, 128, 256, 512, 1024];
 const LEVEL_SPAWN_BATCH_SIZES = [2, 4, 6, 8, 10, 12, 14, 16];
@@ -28,7 +28,19 @@ const MINI_BOSS_RANGED_DEATH_BURST_DELAY_MS = 320;
 const MINI_BOSS_RANGED_DEATH_BURST_BASE_COUNT = 40;
 
 const PLAYER_SPEED = 230;
-const ENEMY_SPEED = 58;
+const PLAYER_SCALE = 0.9;
+const PLAYER_BODY_RADIUS = 12;
+const PLAYER_BODY_OFFSET = 4;
+const ENEMY_SPEED = 52;
+const ENEMY_SPEED_MULTIPLIER = 0.9;
+const ENEMY_SCALE = 0.9;
+const ENEMY_BODY_RADIUS = 12;
+const ENEMY_BODY_OFFSET = 4;
+const ENEMY_HEALTH_BAR_WIDTH = 28;
+const ENEMY_HEALTH_BAR_HEIGHT = 5;
+const MINI_BOSS_SCALE = 0.9;
+const MINI_BOSS_BODY_RADIUS = 25;
+const MINI_BOSS_BODY_OFFSET = 7;
 const BULLET_SPEED = 590;
 const STARTING_FIRE_COOLDOWN_MS = 220;
 const MIN_FIRE_COOLDOWN_MS = 70;
@@ -251,8 +263,9 @@ class GameScene extends Phaser.Scene {
   createPlayer() {
     this.player = this.physics.add.sprite(GAME_WIDTH / 2, GAME_HEIGHT / 2, "player");
     this.player.setDepth(5);
+    this.player.setScale(PLAYER_SCALE);
     this.player.setCollideWorldBounds(true);
-    this.player.body.setCircle(13, 3, 3);
+    this.player.body.setCircle(PLAYER_BODY_RADIUS, PLAYER_BODY_OFFSET, PLAYER_BODY_OFFSET);
   }
 
   createEnemies() {
@@ -346,28 +359,28 @@ class GameScene extends Phaser.Scene {
 
     const choices = [
       {
-        x: 145,
+        x: GAME_WIDTH / 2 - 330,
         type: "speed",
         title: "»  攻速提升",
         detail: "射击间隔减少 18%",
         color: 0x16c9f4
       },
       {
-        x: 365,
+        x: GAME_WIDTH / 2 - 110,
         type: "trajectory",
         title: "⇶  并排弹道",
         detail: "每次射击增加 1 发",
         color: 0xfff36a
       },
       {
-        x: 585,
+        x: GAME_WIDTH / 2 + 110,
         type: "damage",
         title: "◆  火力强化",
         detail: "每发子弹伤害 +1",
         color: 0xff5b86
       },
       {
-        x: 805,
+        x: GAME_WIDTH / 2 + 330,
         type: "health",
         title: "+  生命强化",
         detail: "当前生命和上限 +1",
@@ -794,15 +807,15 @@ class GameScene extends Phaser.Scene {
     enemy.enableBody(true, position.x, position.y, true, true);
     enemy.setDepth(5);
     enemy.setCollideWorldBounds(true);
-    enemy.body.setCircle(13, 3, 3);
+    enemy.body.setCircle(ENEMY_BODY_RADIUS, ENEMY_BODY_OFFSET, ENEMY_BODY_OFFSET);
     enemy.setData("health", ENEMY_MAX_HEALTH);
     enemy.setAlpha(0.2);
-    enemy.setScale(0.7);
+    enemy.setScale(ENEMY_SCALE * 0.7);
 
     this.tweens.add({
       targets: enemy,
       alpha: 1,
-      scale: 1,
+      scale: ENEMY_SCALE,
       duration: 160,
       ease: "Power2"
     });
@@ -883,17 +896,22 @@ class GameScene extends Phaser.Scene {
     this.miniBossDeathBurstEndAt = Infinity;
 
     const texture = config.type === "melee" ? "miniBossMelee" : "miniBossRanged";
+    const miniBossSpeed = Math.round(config.speed * ENEMY_SPEED_MULTIPLIER);
     this.miniBoss.setTexture(texture);
     this.miniBoss.enableBody(true, GAME_WIDTH / 2, 150, true, true);
-    this.miniBoss.setScale(0.25).setAlpha(0);
+    this.miniBoss.setScale(MINI_BOSS_SCALE * 0.25).setAlpha(0);
     this.miniBoss.setCollideWorldBounds(true);
-    this.miniBoss.body.setCircle(28, 4, 4);
+    this.miniBoss.body.setCircle(
+      MINI_BOSS_BODY_RADIUS,
+      MINI_BOSS_BODY_OFFSET,
+      MINI_BOSS_BODY_OFFSET
+    );
     this.miniBoss.setData("type", config.type);
     this.miniBoss.setData("name", config.name);
     this.miniBoss.setData("health", config.health);
     this.miniBoss.setData("maxHealth", config.health);
-    this.miniBoss.setData("speed", config.speed);
-    this.miniBoss.setData("baseSpeed", config.speed);
+    this.miniBoss.setData("speed", miniBossSpeed);
+    this.miniBoss.setData("baseSpeed", miniBossSpeed);
     this.miniBoss.setData("phase", 0);
     this.miniBoss.setData("shotCount", MINI_BOSS_RANGED_BASE_SHOT_COUNT);
     this.miniBoss.setData("bulletSpeed", ENEMY_BULLET_SPEED);
@@ -910,7 +928,7 @@ class GameScene extends Phaser.Scene {
     this.tweens.add({
       targets: this.miniBoss,
       alpha: 1,
-      scale: 1,
+      scale: MINI_BOSS_SCALE,
       duration: 360,
       ease: "Back.Out"
     });
@@ -1063,13 +1081,18 @@ class GameScene extends Phaser.Scene {
       if (!enemy.active) return;
 
       const health = enemy.getData("health");
-      const left = enemy.x - 16;
-      const top = enemy.y - 25;
+      const left = enemy.x - ENEMY_HEALTH_BAR_WIDTH / 2;
+      const top = enemy.y - 23;
 
       this.enemyHealthGraphics.fillStyle(0x330b19, 1);
-      this.enemyHealthGraphics.fillRect(left, top, 32, 5);
+      this.enemyHealthGraphics.fillRect(left, top, ENEMY_HEALTH_BAR_WIDTH, ENEMY_HEALTH_BAR_HEIGHT);
       this.enemyHealthGraphics.fillStyle(0xff326f, 1);
-      this.enemyHealthGraphics.fillRect(left, top, (health / ENEMY_MAX_HEALTH) * 32, 5);
+      this.enemyHealthGraphics.fillRect(
+        left,
+        top,
+        (health / ENEMY_MAX_HEALTH) * ENEMY_HEALTH_BAR_WIDTH,
+        ENEMY_HEALTH_BAR_HEIGHT
+      );
     });
   }
 
