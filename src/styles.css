@@ -31,6 +31,7 @@ body {
 }
 
 .game-shell {
+  position: relative;
   width: min(100%, 960px);
   aspect-ratio: 16 / 9;
   overflow: hidden;
@@ -48,8 +49,80 @@ body {
   image-rendering: pixelated;
 }
 
+.touch-dpad {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: repeat(3, 58px);
+  grid-template-rows: repeat(2, 58px);
+  gap: 8px;
+  user-select: none;
+  touch-action: none;
+}
+
+.touch-dpad.is-hidden {
+  display: none;
+}
+
+.touch-button {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  margin: 0;
+  padding: 0;
+  border: 2px solid rgba(22, 201, 244, 0.95);
+  background: rgba(17, 22, 29, 0.72);
+  color: #f4fbff;
+  font: 700 30px/1 "Microsoft YaHei", "Courier New", monospace;
+  box-shadow: 0 0 0 2px rgba(8, 10, 15, 0.65);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch-button.is-pressed {
+  background: rgba(22, 201, 244, 0.88);
+  color: #061015;
+}
+
+.touch-up {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.touch-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.touch-down {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.touch-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
 @media (max-width: 640px) {
   .page {
     padding: 6px;
+  }
+
+  .touch-dpad {
+    left: 10px;
+    bottom: 10px;
+    grid-template-columns: repeat(3, 54px);
+    grid-template-rows: repeat(2, 54px);
+    gap: 7px;
+  }
+
+  .touch-button {
+    width: 54px;
+    height: 54px;
+    font-size: 28px;
   }
 }

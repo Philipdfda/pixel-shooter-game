@@ -41,8 +41,6 @@ const ENEMY_HEALTH_BAR_HEIGHT = 5;
 const MINI_BOSS_SCALE = 0.9;
 const MINI_BOSS_BODY_RADIUS = 25;
 const MINI_BOSS_BODY_OFFSET = 7;
-const TOUCH_BUTTON_SIZE = 74;
-const TOUCH_BUTTON_GAP = 18;
 const BULLET_SPEED = 590;
 const STARTING_FIRE_COOLDOWN_MS = 220;
 const MIN_FIRE_COOLDOWN_MS = 70;
@@ -81,7 +79,10 @@ class GameScene extends Phaser.Scene {
     this.touchLeftDown = false;
     this.touchRightDown = false;
 
-    this.events.once("shutdown", () => this.clearSpawnTimer());
+    this.events.once("shutdown", () => {
+      this.clearSpawnTimer();
+      this.destroyTouchControls();
+    });
 
     this.createPixelTextures();
     this.createRoom();
@@ -555,66 +556,63 @@ class GameScene extends Phaser.Scene {
   }
 
   createTouchControls() {
-    const baseX = 54;
-    const topY = GAME_HEIGHT - 202;
-    const bottomY = GAME_HEIGHT - 110;
-    const centerX = baseX + TOUCH_BUTTON_SIZE + TOUCH_BUTTON_GAP;
+    this.destroyTouchControls();
+
+    const host = document.querySelector(".game-shell") || document.getElementById("game");
+    if (!host) return;
+
+    const pad = document.createElement("div");
+    pad.className = "touch-dpad";
+    pad.setAttribute("aria-label", "移动方向键");
+
     this.touchButtons = [
-      this.createMoveTouchButton(centerX, topY, "^", "up"),
-      this.createMoveTouchButton(baseX, bottomY, "<", "left"),
-      this.createMoveTouchButton(centerX, bottomY, "v", "down"),
-      this.createMoveTouchButton(centerX + TOUCH_BUTTON_SIZE + TOUCH_BUTTON_GAP, bottomY, ">", "right")
+      this.createMoveTouchButton("^", "up"),
+      this.createMoveTouchButton("<", "left"),
+      this.createMoveTouchButton("v", "down"),
+      this.createMoveTouchButton(">", "right")
     ];
+
+    this.touchButtons.forEach(({ element }) => pad.appendChild(element));
+    host.appendChild(pad);
+    this.touchControlsElement = pad;
     this.updateTouchControlsVisibility();
   }
 
-  createMoveTouchButton(x, y, label, direction) {
-    const button = this.add.rectangle(
-      x,
-      y,
-      TOUCH_BUTTON_SIZE,
-      TOUCH_BUTTON_SIZE,
-      0x11161d,
-      0.58
-    )
-      .setOrigin(0)
-      .setStrokeStyle(3, 0x16c9f4, 0.92)
-      .setDepth(14)
-      .setScrollFactor(0)
-      .setInteractive({ useHandCursor: true });
-
-    const text = this.add.text(x + TOUCH_BUTTON_SIZE / 2, y + TOUCH_BUTTON_SIZE / 2 - 2, label, {
-      fontFamily: '"Microsoft YaHei", "Courier New", monospace',
-      fontSize: "52px",
-      color: "#f4fbff",
-      stroke: "#080a0f",
-      strokeThickness: 4
-    }).setOrigin(0.5).setDepth(15).setScrollFactor(0);
+  createMoveTouchButton(label, direction) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `touch-button touch-${direction}`;
+    button.textContent = label;
+    button.setAttribute("aria-label", `${direction} move`);
 
     const setPressed = (pressed, event) => {
-      if (event) event.stopPropagation();
-      if (direction === "up") {
-        this.touchUpDown = pressed;
-      } else if (direction === "down") {
-        this.touchDownDown = pressed;
-      } else if (direction === "left") {
-        this.touchLeftDown = pressed;
-      } else {
-        this.touchRightDown = pressed;
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
       }
-      button.setFillStyle(pressed ? 0x16c9f4 : 0x11161d, pressed ? 0.78 : 0.58);
+
+      this.setTouchDirection(direction, pressed);
+      button.classList.toggle("is-pressed", pressed);
+
+      if (pressed && event && event.pointerId !== undefined && button.setPointerCapture) {
+        button.setPointerCapture(event.pointerId);
+      }
     };
 
-    button.on("pointerdown", (_pointer, _localX, _localY, event) => setPressed(true, event));
-    button.on("pointerup", (_pointer, _localX, _localY, event) => setPressed(false, event));
-    button.on("pointerout", (_pointer, event) => setPressed(false, event));
-    button.on("pointerupoutside", (_pointer, event) => setPressed(false, event));
+    button.addEventListener("pointerdown", (event) => setPressed(true, event));
+    button.addEventListener("pointerup", (event) => setPressed(false, event));
+    button.addEventListener("pointercancel", (event) => setPressed(false, event));
+    button.addEventListener("lostpointercapture", (event) => setPressed(false, event));
+    button.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
 
-    return { button, text, direction };
+    return { element: button, direction };
   }
 
   updateTouchControlsVisibility() {
-    if (!this.touchButtons) return;
+    if (!this.touchControlsElement || !this.touchButtons) return;
     const visible = !this.isPaused && ["playing", "miniboss", "boss"].includes(this.gameState);
     if (!visible) {
       this.touchUpDown = false;
@@ -622,12 +620,35 @@ class GameScene extends Phaser.Scene {
       this.touchLeftDown = false;
       this.touchRightDown = false;
     }
-    this.touchButtons.forEach(({ button, text, direction }) => {
+    this.touchControlsElement.classList.toggle("is-hidden", !visible);
+    this.touchButtons.forEach(({ element, direction }) => {
       const pressed = this.isTouchDirectionPressed(direction);
-      button.setFillStyle(pressed ? 0x16c9f4 : 0x11161d, pressed ? 0.78 : 0.58);
-      button.setVisible(visible);
-      text.setVisible(visible);
+      element.classList.toggle("is-pressed", pressed);
     });
+  }
+
+  destroyTouchControls() {
+    if (this.touchControlsElement) {
+      this.touchControlsElement.remove();
+      this.touchControlsElement = null;
+    }
+    this.touchButtons = null;
+    this.touchUpDown = false;
+    this.touchDownDown = false;
+    this.touchLeftDown = false;
+    this.touchRightDown = false;
+  }
+
+  setTouchDirection(direction, pressed) {
+    if (direction === "up") {
+      this.touchUpDown = pressed;
+    } else if (direction === "down") {
+      this.touchDownDown = pressed;
+    } else if (direction === "left") {
+      this.touchLeftDown = pressed;
+    } else {
+      this.touchRightDown = pressed;
+    }
   }
 
   isTouchDirectionPressed(direction) {
