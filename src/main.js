@@ -37,8 +37,27 @@ const ENEMY_SPEED_MULTIPLIER = 0.9;
 const ENEMY_SCALE = 0.9;
 const ENEMY_BODY_RADIUS = 12;
 const ENEMY_BODY_OFFSET = 4;
+const ENEMY_MAX_HEALTH = 3;
 const ENEMY_HEALTH_BAR_WIDTH = 28;
 const ENEMY_HEALTH_BAR_HEIGHT = 5;
+const HELMET_ENEMY_INTERVAL = 4;
+const HELMET_ENEMY_HEALTH_MULTIPLIER = 2;
+const SHOOTER_ENEMY_INTERVAL = 16;
+const SHOOTER_ENEMY_SPEED = 44;
+const SHOOTER_ENEMY_SHOT_COOLDOWN_MS = 1300;
+const SHOOTER_ENEMY_BULLET_SPEED = 310;
+const FLYER_ENEMY_INTERVAL = 64;
+const FLYER_ENEMY_SPEED = 82;
+const FLYER_ENEMY_MAX_HEALTH = ENEMY_MAX_HEALTH * 3;
+const FLYER_ENEMY_SHOT_COOLDOWN_MS = 620;
+const FLYER_ENEMY_SCALE = 0.86;
+const FLYER_BODY_RADIUS = 14;
+const FLYER_BODY_OFFSET_X = 10;
+const FLYER_BODY_OFFSET_Y = 4;
+const SHIELD_SPAWN_MIN_MS = 7000;
+const SHIELD_SPAWN_MAX_MS = 12000;
+const SHIELD_MAX_ACTIVE = 2;
+const PLAYER_SHIELD_MAX = 1;
 const MINI_BOSS_SCALE = 0.9;
 const MINI_BOSS_BODY_RADIUS = 25;
 const MINI_BOSS_BODY_OFFSET = 7;
@@ -46,7 +65,6 @@ const BULLET_SPEED = 590;
 const STARTING_FIRE_COOLDOWN_MS = 220;
 const MIN_FIRE_COOLDOWN_MS = 70;
 const DAMAGE_COOLDOWN_MS = 900;
-const ENEMY_MAX_HEALTH = 3;
 const LASER_DAMAGE_BONUS = 1;
 const LASER_WIDTH = 24;
 const GATLING_FIRE_RATE_MULTIPLIER = 0.55;
@@ -65,6 +83,7 @@ class GameScene extends Phaser.Scene {
     this.currentLevel = 1;
     this.playerMaxHealth = 3;
     this.playerHealth = 3;
+    this.playerShield = 0;
     this.fireCooldown = STARTING_FIRE_COOLDOWN_MS;
     this.bulletCount = 1;
     this.bulletDamage = 1;
@@ -89,6 +108,7 @@ class GameScene extends Phaser.Scene {
     this.touchDownDown = false;
     this.touchLeftDown = false;
     this.touchRightDown = false;
+    this.nextShieldSpawnAt = 0;
 
     this.events.once("shutdown", () => {
       this.clearSpawnTimer();
@@ -101,6 +121,7 @@ class GameScene extends Phaser.Scene {
     this.createPlayer();
     this.createEnemies();
     this.createBullets();
+    this.createPickups();
     this.createMiniBossElements();
     this.createHud();
     this.createCrosshair();
@@ -160,9 +181,13 @@ class GameScene extends Phaser.Scene {
     }
     this.updateCareerSkill(time);
     this.recycleOldBullets(time);
+    if (["playing", "miniboss"].includes(this.gameState)) {
+      this.updateShieldSpawns(time);
+    }
 
     if (this.gameState === "playing") {
-      this.updateEnemies();
+      this.updateEnemies(time);
+      this.recycleOldEnemyBullets(time);
       this.updateEnemyHealthBars();
     } else if (this.gameState === "miniboss") {
       this.updateMiniBoss(time);
@@ -200,6 +225,46 @@ class GameScene extends Phaser.Scene {
     graphics.fillStyle(0x4f071d);
     graphics.fillRect(9, 21, 14, 4);
     graphics.generateTexture("enemy", 32, 32);
+
+    graphics.clear();
+    graphics.fillStyle(0xff326f);
+    graphics.fillRect(4, 7, 24, 21);
+    graphics.fillStyle(0xaeb8c8);
+    graphics.fillRect(6, 2, 20, 9);
+    graphics.fillStyle(0xe8fcff);
+    graphics.fillRect(9, 4, 14, 3);
+    graphics.fillStyle(0xffb1c8);
+    graphics.fillRect(8, 12, 6, 6);
+    graphics.fillRect(19, 12, 6, 6);
+    graphics.fillStyle(0x4f071d);
+    graphics.fillRect(9, 23, 14, 4);
+    graphics.generateTexture("enemyHelmet", 32, 32);
+
+    graphics.clear();
+    graphics.fillStyle(0xa750ff);
+    graphics.fillRect(4, 4, 23, 24);
+    graphics.fillStyle(0x1ce4ff);
+    graphics.fillRect(8, 9, 6, 6);
+    graphics.fillRect(18, 9, 6, 6);
+    graphics.fillStyle(0xfff36a);
+    graphics.fillRect(22, 17, 10, 4);
+    graphics.fillRect(29, 15, 3, 8);
+    graphics.fillStyle(0x21102f);
+    graphics.fillRect(9, 22, 13, 4);
+    graphics.generateTexture("enemyShooter", 32, 32);
+
+    graphics.clear();
+    graphics.fillStyle(0x1ce4ff);
+    graphics.fillRect(8, 10, 32, 12);
+    graphics.fillStyle(0xfff36a);
+    graphics.fillRect(18, 2, 12, 28);
+    graphics.fillStyle(0xe8fcff);
+    graphics.fillRect(33, 13, 11, 6);
+    graphics.fillStyle(0xff326f);
+    graphics.fillRect(4, 13, 8, 6);
+    graphics.fillStyle(0x06323d);
+    graphics.fillRect(22, 9, 6, 5);
+    graphics.generateTexture("enemyFlyer", 48, 32);
 
     graphics.clear();
     graphics.fillStyle(0xfff36a);
@@ -241,6 +306,17 @@ class GameScene extends Phaser.Scene {
     graphics.fillStyle(0xffffff);
     graphics.fillRect(3, 3, 6, 6);
     graphics.generateTexture("enemyBullet", 12, 12);
+
+    graphics.clear();
+    graphics.fillStyle(0x16c9f4);
+    graphics.fillRect(8, 2, 16, 4);
+    graphics.fillRect(5, 6, 22, 8);
+    graphics.fillRect(8, 14, 16, 8);
+    graphics.fillRect(12, 22, 8, 6);
+    graphics.fillStyle(0xe8fcff);
+    graphics.fillRect(11, 8, 10, 4);
+    graphics.fillRect(13, 14, 6, 6);
+    graphics.generateTexture("shieldPickup", 32, 32);
 
     graphics.clear();
     graphics.fillStyle(0x7213a8);
@@ -306,10 +382,17 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  createPickups() {
+    this.shields = this.physics.add.group({
+      defaultKey: "shieldPickup",
+      maxSize: SHIELD_MAX_ACTIVE
+    });
+  }
+
   createMiniBossElements() {
     this.enemyBullets = this.physics.add.group({
       defaultKey: "enemyBullet",
-      maxSize: 360
+      maxSize: 900
     });
     this.miniBoss = this.physics.add.sprite(0, 0, "miniBossMelee");
     this.miniBoss.setDepth(7);
@@ -820,6 +903,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.bullets, this.boss, this.hitFinalBoss, null, this);
     this.physics.add.overlap(this.player, this.enemies, this.takeDamage, null, this);
     this.physics.add.overlap(this.player, this.miniBoss, this.takeDamage, null, this);
+    this.physics.add.overlap(this.player, this.shields, this.pickUpShield, null, this);
     this.physics.add.overlap(
       this.player,
       this.enemyBullets,
@@ -891,6 +975,7 @@ class GameScene extends Phaser.Scene {
     this.clearSpawnTimer();
     this.disableAllBullets();
     this.disableAllEnemyBullets();
+    this.disableAllShields();
     this.enemies.children.each((enemy) => {
       if (enemy.active) enemy.disableBody(true, true);
     });
@@ -933,6 +1018,8 @@ class GameScene extends Phaser.Scene {
     this.player.clearTint();
     this.disableAllBullets();
     this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.scheduleNextShieldSpawn(this.time.now);
     if (this.miniBoss.active) this.miniBoss.disableBody(true, true);
     this.enemyHealthGraphics.clear();
     this.miniBossHealthGraphics.clear();
@@ -1072,28 +1159,85 @@ class GameScene extends Phaser.Scene {
   spawnEnemy() {
     if (this.gameState !== "playing") return;
 
+    const spawnNumber = this.spawnedEnemies + 1;
+    const enemyType = this.getEnemyTypeForSpawn(spawnNumber);
     const position = this.getEnemySpawnPosition();
-    const enemy = this.enemies.get(position.x, position.y, "enemy");
+    const enemy = this.enemies.get(position.x, position.y, this.getEnemyTexture(enemyType));
     if (!enemy) return;
 
+    const maxHealth = this.getEnemyMaxHealth(enemyType);
+    const speed = this.getEnemySpeed(enemyType);
+    const shotCooldown = this.getEnemyShotCooldown(enemyType);
+    const lastShotAt = Number.isFinite(shotCooldown)
+      ? this.time.now - Phaser.Math.Between(0, Math.floor(shotCooldown / 2))
+      : -Infinity;
+    const targetScale = enemyType === "flyer" ? FLYER_ENEMY_SCALE : ENEMY_SCALE;
+
     enemy.enableBody(true, position.x, position.y, true, true);
+    enemy.setTexture(this.getEnemyTexture(enemyType));
     enemy.setDepth(5);
     enemy.setCollideWorldBounds(true);
-    enemy.body.setCircle(ENEMY_BODY_RADIUS, ENEMY_BODY_OFFSET, ENEMY_BODY_OFFSET);
-    enemy.setData("health", ENEMY_MAX_HEALTH);
+    this.configureEnemyBody(enemy, enemyType);
+    enemy.setData("type", enemyType);
+    enemy.setData("health", maxHealth);
+    enemy.setData("maxHealth", maxHealth);
+    enemy.setData("speed", speed);
+    enemy.setData("shotCooldown", shotCooldown);
+    enemy.setData("lastShotAt", lastShotAt);
     enemy.setAlpha(0.2);
-    enemy.setScale(ENEMY_SCALE * 0.7);
+    enemy.setScale(targetScale * 0.7);
+    enemy.clearTint();
 
     this.tweens.add({
       targets: enemy,
       alpha: 1,
-      scale: ENEMY_SCALE,
+      scale: targetScale,
       duration: 160,
       ease: "Power2"
     });
 
     this.spawnedEnemies += 1;
     this.updateTargetHud();
+  }
+
+  getEnemyTypeForSpawn(spawnNumber) {
+    if (spawnNumber % FLYER_ENEMY_INTERVAL === 0) return "flyer";
+    if (spawnNumber % SHOOTER_ENEMY_INTERVAL === 0) return "shooter";
+    if (spawnNumber % HELMET_ENEMY_INTERVAL === 0) return "helmet";
+    return "normal";
+  }
+
+  getEnemyTexture(enemyType) {
+    if (enemyType === "helmet") return "enemyHelmet";
+    if (enemyType === "shooter") return "enemyShooter";
+    if (enemyType === "flyer") return "enemyFlyer";
+    return "enemy";
+  }
+
+  getEnemyMaxHealth(enemyType) {
+    if (enemyType === "helmet") return ENEMY_MAX_HEALTH * HELMET_ENEMY_HEALTH_MULTIPLIER;
+    if (enemyType === "flyer") return FLYER_ENEMY_MAX_HEALTH;
+    return ENEMY_MAX_HEALTH;
+  }
+
+  getEnemySpeed(enemyType) {
+    if (enemyType === "shooter") return SHOOTER_ENEMY_SPEED;
+    if (enemyType === "flyer") return FLYER_ENEMY_SPEED;
+    return ENEMY_SPEED;
+  }
+
+  getEnemyShotCooldown(enemyType) {
+    if (enemyType === "shooter") return SHOOTER_ENEMY_SHOT_COOLDOWN_MS;
+    if (enemyType === "flyer") return FLYER_ENEMY_SHOT_COOLDOWN_MS;
+    return Infinity;
+  }
+
+  configureEnemyBody(enemy, enemyType) {
+    if (enemyType === "flyer") {
+      enemy.body.setCircle(FLYER_BODY_RADIUS, FLYER_BODY_OFFSET_X, FLYER_BODY_OFFSET_Y);
+      return;
+    }
+    enemy.body.setCircle(ENEMY_BODY_RADIUS, ENEMY_BODY_OFFSET, ENEMY_BODY_OFFSET);
   }
 
   getEnemySpawnPosition() {
@@ -1105,6 +1249,66 @@ class GameScene extends Phaser.Scene {
     if (side === 1) return { x: GAME_WIDTH - 72, y: vertical };
     if (side === 2) return { x: horizontal, y: GAME_HEIGHT - 72 };
     return { x: 72, y: vertical };
+  }
+
+  scheduleNextShieldSpawn(time) {
+    this.nextShieldSpawnAt = time + Phaser.Math.Between(SHIELD_SPAWN_MIN_MS, SHIELD_SPAWN_MAX_MS);
+  }
+
+  updateShieldSpawns(time) {
+    if (!this.shields || time < this.nextShieldSpawnAt) return;
+
+    if (this.shields.countActive(true) < SHIELD_MAX_ACTIVE) {
+      this.spawnShield();
+    }
+    this.scheduleNextShieldSpawn(time);
+  }
+
+  spawnShield() {
+    const position = {
+      x: Phaser.Math.Between(92, GAME_WIDTH - 92),
+      y: Phaser.Math.Between(96, GAME_HEIGHT - 96)
+    };
+    const shield = this.shields.get(position.x, position.y, "shieldPickup");
+    if (!shield) return;
+
+    shield.enableBody(true, position.x, position.y, true, true);
+    shield.setDepth(4);
+    shield.setScale(0.82);
+    shield.setAlpha(0.92);
+    shield.body.setCircle(13, 3, 3);
+    shield.setData("bornAt", this.time.now);
+
+    this.tweens.add({
+      targets: shield,
+      scale: 1,
+      alpha: 1,
+      duration: 220,
+      yoyo: true,
+      repeat: 1
+    });
+    this.syncDebugState();
+  }
+
+  pickUpShield(player, shield) {
+    if (!["playing", "miniboss"].includes(this.gameState) || !shield.active) return;
+    if (this.playerShield >= PLAYER_SHIELD_MAX) return;
+
+    this.playerShield += 1;
+    shield.disableBody(true, true);
+    this.updateStatsHud();
+
+    const ring = this.add.circle(player.x, player.y, 24, 0x16c9f4, 0.26)
+      .setStrokeStyle(3, 0xe8fcff, 0.86)
+      .setDepth(18);
+    this.tweens.add({
+      targets: ring,
+      scale: 2,
+      alpha: 0,
+      duration: 240,
+      onComplete: () => ring.destroy()
+    });
+    this.syncDebugState();
   }
 
   updatePlayer() {
@@ -1135,17 +1339,59 @@ class GameScene extends Phaser.Scene {
     this.crosshair.setVisible(["playing", "miniboss", "boss"].includes(this.gameState));
   }
 
-  updateEnemies() {
+  updateEnemies(time) {
     this.enemies.children.each((enemy) => {
       if (!enemy.active) return;
 
-      const direction = new Phaser.Math.Vector2(
+      const enemyType = enemy.getData("type") || "normal";
+      const speed = enemy.getData("speed") || ENEMY_SPEED;
+      const directionToPlayer = new Phaser.Math.Vector2(
         this.player.x - enemy.x,
         this.player.y - enemy.y
-      ).normalize().scale(ENEMY_SPEED);
+      );
+      if (directionToPlayer.lengthSq() === 0) directionToPlayer.set(0, 1);
 
-      enemy.setVelocity(direction.x, direction.y);
+      const distance = directionToPlayer.length();
+      directionToPlayer.normalize();
+
+      let movement = directionToPlayer.clone().scale(speed);
+      if (enemyType === "shooter" || enemyType === "flyer") {
+        movement = this.getRangedEnemyMovement(enemyType, directionToPlayer, distance, time, speed);
+        this.fireRangedEnemyBullet(enemy, enemyType, time, directionToPlayer.angle());
+      }
+
+      enemy.setVelocity(movement.x, movement.y);
+      enemy.rotation = directionToPlayer.angle() + Math.PI / 2;
     });
+  }
+
+  getRangedEnemyMovement(enemyType, directionToPlayer, distance, time, speed) {
+    const preferredMinDistance = enemyType === "flyer" ? 300 : 250;
+    const preferredMaxDistance = enemyType === "flyer" ? 430 : 360;
+
+    if (distance > preferredMaxDistance) {
+      return directionToPlayer.clone().scale(speed);
+    }
+    if (distance < preferredMinDistance) {
+      return directionToPlayer.clone().scale(-speed);
+    }
+
+    const strafeDirection = Math.floor(time / (enemyType === "flyer" ? 900 : 1300)) % 2 === 0 ? 1 : -1;
+    return new Phaser.Math.Vector2(-directionToPlayer.y, directionToPlayer.x)
+      .scale(speed * strafeDirection);
+  }
+
+  fireRangedEnemyBullet(enemy, enemyType, time, centerAngle) {
+    const shotCooldown = enemy.getData("shotCooldown");
+    const lastShotAt = enemy.getData("lastShotAt") || 0;
+    if (!Number.isFinite(shotCooldown) || time - lastShotAt < shotCooldown) return;
+
+    const bulletSpeed = enemyType === "flyer" ? BULLET_SPEED : SHOOTER_ENEMY_BULLET_SPEED;
+    const startDistance = enemyType === "flyer" ? 30 : 24;
+    const startX = enemy.x + Math.cos(centerAngle) * startDistance;
+    const startY = enemy.y + Math.sin(centerAngle) * startDistance;
+    this.spawnEnemyBullet(startX, startY, centerAngle, bulletSpeed, time);
+    enemy.setData("lastShotAt", time);
   }
 
   startMiniBoss() {
@@ -1353,6 +1599,7 @@ class GameScene extends Phaser.Scene {
       if (!enemy.active) return;
 
       const health = enemy.getData("health");
+      const maxHealth = enemy.getData("maxHealth") || ENEMY_MAX_HEALTH;
       const left = enemy.x - ENEMY_HEALTH_BAR_WIDTH / 2;
       const top = enemy.y - 23;
 
@@ -1362,7 +1609,7 @@ class GameScene extends Phaser.Scene {
       this.enemyHealthGraphics.fillRect(
         left,
         top,
-        (health / ENEMY_MAX_HEALTH) * ENEMY_HEALTH_BAR_WIDTH,
+        (health / maxHealth) * ENEMY_HEALTH_BAR_WIDTH,
         ENEMY_HEALTH_BAR_HEIGHT
       );
     });
@@ -1843,7 +2090,7 @@ class GameScene extends Phaser.Scene {
   takeEnemyBulletDamage(objectA, objectB) {
     const player = objectA === this.player ? objectA : objectB;
     const bullet = player === objectA ? objectB : objectA;
-    if (this.gameState !== "miniboss" || !bullet.active) return;
+    if (!["playing", "miniboss"].includes(this.gameState) || !bullet.active) return;
 
     const sourceX = bullet.x;
     const sourceY = bullet.y;
@@ -1856,8 +2103,43 @@ class GameScene extends Phaser.Scene {
     if (now - this.lastDamageAt < DAMAGE_COOLDOWN_MS) return;
 
     this.lastDamageAt = now;
+
+    if (this.playerShield > 0) {
+      this.playerShield -= 1;
+      this.updateHealthHud();
+      this.updateStatsHud();
+
+      player.setTint(0x16c9f4);
+      this.time.delayedCall(140, () => {
+        if (player.active) player.clearTint();
+      });
+
+      const shieldFlash = this.add.circle(player.x, player.y, 30, 0x16c9f4, 0.28)
+        .setStrokeStyle(4, 0xe8fcff, 0.9)
+        .setDepth(18);
+      this.tweens.add({
+        targets: shieldFlash,
+        scale: 2.3,
+        alpha: 0,
+        duration: 260,
+        onComplete: () => shieldFlash.destroy()
+      });
+
+      const shieldPush = new Phaser.Math.Vector2(player.x - sourceX, player.y - sourceY)
+        .normalize()
+        .scale(28);
+      player.setPosition(
+        Phaser.Math.Clamp(player.x + shieldPush.x, 42, GAME_WIDTH - 42),
+        Phaser.Math.Clamp(player.y + shieldPush.y, 42, GAME_HEIGHT - 42)
+      );
+      this.cameras.main.shake(70, 0.003);
+      this.syncDebugState();
+      return;
+    }
+
     this.playerHealth -= 1;
     this.updateHealthHud();
+    this.updateStatsHud();
 
     player.setTintFill(0xffffff);
     this.time.delayedCall(120, () => {
@@ -1889,6 +2171,8 @@ class GameScene extends Phaser.Scene {
     }
 
     this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
     this.enemyHealthGraphics.clear();
     this.player.setVelocity(0, 0);
     this.clearSpawnTimer();
@@ -1917,6 +2201,7 @@ class GameScene extends Phaser.Scene {
     this.miniBossNameText.setColor("#fff36a").setVisible(false);
     this.disableAllBullets();
     this.disableAllEnemyBullets();
+    this.disableAllShields();
     this.cameras.main.flash(180, 255, 243, 106);
     this.syncDebugState();
     this.time.delayedCall(350, () => this.resumeLevelAfterMiniBoss());
@@ -2032,6 +2317,8 @@ class GameScene extends Phaser.Scene {
     this.bossFrozen = false;
     this.finalBossHealth = FINAL_BOSS_MAX_HEALTH;
     this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
     this.levelText.setText("最终信号");
     this.enemyText.setText(`目标  ${FINAL_BOSS_MAX_HEALTH}`);
     this.boss.enableBody(true, GAME_WIDTH / 2, 178, true, true);
@@ -2099,6 +2386,7 @@ class GameScene extends Phaser.Scene {
     this.boss.body.enable = false;
     this.playerHealth = 0;
     this.updateHealthHud();
+    this.updateStatsHud();
     this.player.setVelocity(0, 0);
     this.bossWarningText.setText("全屏清除协议已执行");
     this.laserOuter.setVisible(true).setScale(0, 1);
@@ -2172,6 +2460,7 @@ class GameScene extends Phaser.Scene {
     this.clearSpawnTimer();
     this.disableAllBullets();
     this.disableAllEnemyBullets();
+    this.disableAllShields();
     this.enemyHealthGraphics.clear();
     this.miniBossHealthGraphics.clear();
     this.miniBossNameText.setVisible(false);
@@ -2225,6 +2514,10 @@ class GameScene extends Phaser.Scene {
     debugState.enemyBullets = String(
       this.enemyBullets ? this.enemyBullets.countActive(true) : 0
     );
+    debugState.playerShield = String(this.playerShield);
+    debugState.activeShields = String(
+      this.shields ? this.shields.countActive(true) : 0
+    );
     debugState.upgradesChosen = String(this.upgradesChosen);
     debugState.careerClass = this.careerClass || "";
     debugState.isPaused = String(this.isPaused);
@@ -2258,7 +2551,7 @@ class GameScene extends Phaser.Scene {
 
   getStatsText(prefix = "") {
     const speedMultiplier = STARTING_FIRE_COOLDOWN_MS / this.fireCooldown;
-    return `${prefix}攻速 ${speedMultiplier.toFixed(1)}x  ·  弹道 ${this.bulletCount}  ·  伤害 ${this.bulletDamage}  ·  生命 ${this.playerHealth}/${this.playerMaxHealth}  ·  职业 ${this.getCareerName()}`;
+    return `${prefix}攻速 ${speedMultiplier.toFixed(1)}x  ·  弹道 ${this.bulletCount}  ·  伤害 ${this.bulletDamage}  ·  生命 ${this.playerHealth}/${this.playerMaxHealth}  ·  护盾 ${this.playerShield}/${PLAYER_SHIELD_MAX}  ·  职业 ${this.getCareerName()}`;
   }
 
   getCareerName() {
@@ -2279,6 +2572,13 @@ class GameScene extends Phaser.Scene {
     if (!this.enemyBullets) return;
     this.enemyBullets.children.each((bullet) => {
       if (bullet.active) bullet.disableBody(true, true);
+    });
+  }
+
+  disableAllShields() {
+    if (!this.shields) return;
+    this.shields.children.each((shield) => {
+      if (shield.active) shield.disableBody(true, true);
     });
   }
 }
