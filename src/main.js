@@ -63,6 +63,8 @@ const PORTAL_BODY_RADIUS = 21;
 const PORTAL_BODY_OFFSET = 6;
 const PORTAL_EXIT_OFFSET = 58;
 const PORTAL_COOLDOWN_MS = 700;
+const PORTAL_NEXT_COUNT = 1;
+const PORTAL_DEATH_COUNT = 3;
 const MINI_BOSS_SCALE = 0.9;
 const MINI_BOSS_BODY_RADIUS = 25;
 const MINI_BOSS_BODY_OFFSET = 7;
@@ -519,6 +521,7 @@ class GameScene extends Phaser.Scene {
       portal.body.setImmovable(true);
       portal.body.moves = false;
       portal.setData("index", index);
+      portal.setData("portalType", "teleport");
       portal.setData("destinationIndex", (index + 4) % positions.length);
       this.portals.add(portal);
 
@@ -531,6 +534,64 @@ class GameScene extends Phaser.Scene {
 
       return portal;
     });
+  }
+
+  assignPortalRoles() {
+    if (!this.portalSprites) return;
+
+    const shuffledIndexes = Phaser.Utils.Array.Shuffle(
+      this.portalSprites.map((portal) => portal.getData("index"))
+    );
+    const nextIndexes = shuffledIndexes.slice(0, PORTAL_NEXT_COUNT);
+    const deathIndexes = shuffledIndexes.slice(
+      PORTAL_NEXT_COUNT,
+      PORTAL_NEXT_COUNT + PORTAL_DEATH_COUNT
+    );
+    const teleportIndexes = shuffledIndexes.slice(PORTAL_NEXT_COUNT + PORTAL_DEATH_COUNT);
+
+    this.portalSprites.forEach((portal) => {
+      portal.setData("portalType", "teleport");
+      portal.setData("destinationIndex", null);
+      portal.clearTint();
+    });
+
+    nextIndexes.forEach((index) => {
+      this.portalSprites[index].setData("portalType", "next");
+    });
+    deathIndexes.forEach((index) => {
+      this.portalSprites[index].setData("portalType", "death");
+    });
+    this.assignTeleportPortalPairs(teleportIndexes);
+    this.syncDebugState();
+  }
+
+  assignTeleportPortalPairs(teleportIndexes) {
+    const unpaired = [...teleportIndexes];
+
+    while (unpaired.length > 1) {
+      const firstIndex = unpaired.shift();
+      const firstPortal = this.portalSprites[firstIndex];
+      let farthestListIndex = 0;
+      let farthestDistance = -Infinity;
+
+      unpaired.forEach((candidateIndex, listIndex) => {
+        const candidatePortal = this.portalSprites[candidateIndex];
+        const distance = Phaser.Math.Distance.Between(
+          firstPortal.x,
+          firstPortal.y,
+          candidatePortal.x,
+          candidatePortal.y
+        );
+        if (distance > farthestDistance) {
+          farthestDistance = distance;
+          farthestListIndex = listIndex;
+        }
+      });
+
+      const secondIndex = unpaired.splice(farthestListIndex, 1)[0];
+      firstPortal.setData("destinationIndex", secondIndex);
+      this.portalSprites[secondIndex].setData("destinationIndex", firstIndex);
+    }
   }
 
   createMiniBossElements() {
@@ -1193,6 +1254,7 @@ class GameScene extends Phaser.Scene {
     this.disableAllTrapTurrets();
     this.clearMysteryTunnels();
     this.scheduleNextShieldSpawn(this.time.now);
+    this.assignPortalRoles();
     if (this.miniBoss.active) this.miniBoss.disableBody(true, true);
     this.enemyHealthGraphics.clear();
     this.miniBossHealthGraphics.clear();
@@ -1485,10 +1547,21 @@ class GameScene extends Phaser.Scene {
   }
 
   usePortal(player, portal) {
-    if (!["playing", "miniboss", "boss"].includes(this.gameState) || !portal.active) return;
+    if (!["playing", "miniboss"].includes(this.gameState) || !portal.active) return;
 
     const now = this.time.now;
     if (now - this.lastTeleportAt < PORTAL_COOLDOWN_MS) return;
+
+    this.lastTeleportAt = now;
+    const portalType = portal.getData("portalType") || "teleport";
+    if (portalType === "next") {
+      this.enterNextLevelPortal(portal);
+      return;
+    }
+    if (portalType === "death") {
+      this.enterDeathPortal(portal);
+      return;
+    }
 
     const destinationIndex = portal.getData("destinationIndex");
     const destination = this.portalSprites[destinationIndex];
@@ -1512,12 +1585,70 @@ class GameScene extends Phaser.Scene {
       GAME_HEIGHT - 42
     );
 
-    this.lastTeleportAt = now;
     this.showPortalFlash(portal.x, portal.y);
     player.setPosition(exitX, exitY);
     player.setVelocity(0, 0);
     this.showPortalFlash(destination.x, destination.y);
     this.cameras.main.flash(80, 22, 201, 244);
+    this.syncDebugState();
+  }
+
+  enterNextLevelPortal(portal) {
+    this.gameState = "transition";
+    this.clearSpawnTimer();
+    this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.enemies.children.each((enemy) => {
+      if (enemy.active) enemy.disableBody(true, true);
+    });
+    if (this.miniBoss.active) {
+      this.tweens.killTweensOf(this.miniBoss);
+      this.miniBoss.disableBody(true, true);
+    }
+    this.enemyHealthGraphics.clear();
+    this.miniBossHealthGraphics.clear();
+    this.miniBossNameText.setVisible(false);
+    this.spawnedEnemies = this.levelEnemyTotal;
+    this.defeatedEnemies = this.levelEnemyTotal;
+    this.miniBossDefeated = true;
+    this.player.setVelocity(0, 0);
+    this.showPortalFlash(portal.x, portal.y);
+    this.levelText.setText(`传送门跳过第 ${this.currentLevel} 关`);
+    this.enemyText.setText("目标  下一关");
+    this.cameras.main.flash(160, 112, 239, 141);
+    this.syncDebugState();
+
+    this.time.delayedCall(420, () => {
+      if (this.gameState !== "transition") return;
+      if (this.currentLevel === LEVEL_ENEMY_COUNTS.length) {
+        this.startBossSequence();
+      } else {
+        this.startLevel(this.currentLevel + 1);
+      }
+    });
+  }
+
+  enterDeathPortal(portal) {
+    this.gameState = "ended";
+    this.clearSpawnTimer();
+    this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.enemies.children.each((enemy) => enemy.setVelocity(0, 0));
+    if (this.miniBoss.active) this.miniBoss.setVelocity(0, 0);
+    this.playerHealth = 0;
+    this.updateHealthHud();
+    this.updateStatsHud();
+    this.player.setVelocity(0, 0);
+    this.player.setTintFill(0xffffff);
+    this.showPortalFlash(portal.x, portal.y);
+    this.cameras.main.flash(160, 255, 50, 111);
+    this.cameras.main.shake(240, 0.014);
+    this.endTitle.setText("传送门事故");
+    this.endTitle.setColor("#ff5b86");
+    this.endMessage.setText("这个门没有通向下一关。\n它只通向失败。");
+    this.endScreen.setVisible(true);
     this.syncDebugState();
   }
 
@@ -3106,6 +3237,9 @@ class GameScene extends Phaser.Scene {
     debugState.portals = String(
       this.portals ? this.portals.countActive(true) : 0
     );
+    debugState.portalNext = String(this.countPortalsByType("next"));
+    debugState.portalDeath = String(this.countPortalsByType("death"));
+    debugState.portalTeleport = String(this.countPortalsByType("teleport"));
     debugState.mysteryTunnels = String(
       this.mysteryTunnels ? this.mysteryTunnels.countActive(true) : 0
     );
@@ -3177,6 +3311,11 @@ class GameScene extends Phaser.Scene {
     if (this.careerClass === "chicken") return "鸡王";
     if (this.careerClass === "mysteryPortal" || this.careerClass === "builder") return "神秘传送门";
     return "未选择";
+  }
+
+  countPortalsByType(portalType) {
+    if (!this.portalSprites) return 0;
+    return this.portalSprites.filter((portal) => portal.getData("portalType") === portalType).length;
   }
 
   disableAllBullets() {
