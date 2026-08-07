@@ -67,7 +67,9 @@ const MINI_BOSS_SCALE = 0.9;
 const MINI_BOSS_BODY_RADIUS = 25;
 const MINI_BOSS_BODY_OFFSET = 7;
 const BULLET_SPEED = 590;
-const STARTING_FIRE_COOLDOWN_MS = 220;
+const STARTING_FIRE_RATE_PER_SECOND = 3;
+const FIRE_RATE_UPGRADE_PER_SECOND = 1;
+const STARTING_FIRE_COOLDOWN_MS = Math.round(1000 / STARTING_FIRE_RATE_PER_SECOND);
 const MIN_FIRE_COOLDOWN_MS = 70;
 const DAMAGE_COOLDOWN_MS = 900;
 const LASER_DAMAGE_BONUS = 1;
@@ -78,6 +80,11 @@ const MELEE_SLASH_COOLDOWN_MS = 2000;
 const MELEE_SLASH_RANGE = 150;
 const MELEE_SLASH_ARC = Math.PI / 2;
 const MELEE_SLASH_DAMAGE = 12;
+const CHICKEN_TRAP_COUNT = 20;
+const TURRET_TRAP_COUNT = 20;
+const TURRET_TRAP_SHOT_COOLDOWN_MS = 520;
+const TURRET_TRAP_BULLET_SPEED = 370;
+const MYSTERY_TUNNEL_BODY_RADIUS = 31;
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -115,6 +122,8 @@ class GameScene extends Phaser.Scene {
     this.touchRightDown = false;
     this.nextShieldSpawnAt = 0;
     this.lastTeleportAt = -Infinity;
+    this.mysteryTunnelLocked = false;
+    this.mysteryTunnelLabels = [];
 
     this.events.once("shutdown", () => {
       this.clearSpawnTimer();
@@ -128,6 +137,7 @@ class GameScene extends Phaser.Scene {
     this.createEnemies();
     this.createBullets();
     this.createPickups();
+    this.createCareerTrapElements();
     this.createPortals();
     this.createMiniBossElements();
     this.createHud();
@@ -143,7 +153,7 @@ class GameScene extends Phaser.Scene {
 
     this.input.setDefaultCursor("none");
     this.input.on("pointerdown", (pointer) => {
-      if (!this.isPaused && ["playing", "miniboss", "boss"].includes(this.gameState)) {
+      if (!this.isPaused && ["playing", "miniboss", "boss", "mysteryPortal", "turretArena"].includes(this.gameState)) {
         this.tryShoot(this.time.now, pointer);
       }
     });
@@ -175,7 +185,7 @@ class GameScene extends Phaser.Scene {
 
     this.updateCrosshair();
 
-    if (!["playing", "miniboss", "boss"].includes(this.gameState)) {
+    if (!["playing", "miniboss", "boss", "mysteryPortal", "turretArena"].includes(this.gameState)) {
       this.player.setVelocity(0, 0);
       this.enemies.children.each((enemy) => enemy.setVelocity(0, 0));
       if (this.miniBoss.active) this.miniBoss.setVelocity(0, 0);
@@ -200,8 +210,11 @@ class GameScene extends Phaser.Scene {
       this.updateMiniBoss(time);
       this.updateMiniBossDeathBurst(time);
       this.recycleOldEnemyBullets(time);
-    } else {
+    } else if (this.gameState === "boss") {
       this.updateBossCountdown(time);
+    } else if (this.gameState === "turretArena") {
+      this.updateTurretArena(time);
+      this.recycleOldEnemyBullets(time);
     }
 
     if (this.input.activePointer.isDown && !this.isTouchMovePressed()) {
@@ -340,6 +353,69 @@ class GameScene extends Phaser.Scene {
     graphics.generateTexture("portal", 54, 54);
 
     graphics.clear();
+    graphics.fillStyle(0x4a5568);
+    graphics.fillRect(14, 10, 52, 64);
+    graphics.fillStyle(0x1ce4ff);
+    graphics.fillRect(24, 20, 32, 10);
+    graphics.fillStyle(0xff326f);
+    graphics.fillRect(5, 28, 12, 38);
+    graphics.fillRect(63, 28, 12, 38);
+    graphics.fillStyle(0xfff36a);
+    graphics.fillRect(22, 72, 14, 20);
+    graphics.fillRect(44, 72, 14, 20);
+    graphics.fillStyle(0xe8fcff);
+    graphics.fillRect(30, 42, 20, 12);
+    graphics.generateTexture("mecha", 80, 96);
+
+    graphics.clear();
+    graphics.fillStyle(0xffffff);
+    graphics.fillRect(6, 8, 20, 18);
+    graphics.fillStyle(0xfff36a);
+    graphics.fillRect(22, 13, 8, 6);
+    graphics.fillStyle(0xff326f);
+    graphics.fillRect(10, 3, 8, 7);
+    graphics.fillStyle(0x11161d);
+    graphics.fillRect(19, 12, 3, 3);
+    graphics.fillStyle(0xff7138);
+    graphics.fillRect(10, 25, 4, 5);
+    graphics.fillRect(19, 25, 4, 5);
+    graphics.generateTexture("chicken", 32, 32);
+
+    graphics.clear();
+    graphics.fillStyle(0x330b19, 1);
+    graphics.fillCircle(36, 36, 34);
+    graphics.fillStyle(0xff326f, 0.92);
+    graphics.fillCircle(36, 36, 25);
+    graphics.fillStyle(0x080a0f, 0.95);
+    graphics.fillCircle(36, 36, 15);
+    graphics.lineStyle(4, 0xfff36a, 0.8);
+    graphics.strokeCircle(36, 36, 31);
+    graphics.generateTexture("redTunnel", 72, 72);
+
+    graphics.clear();
+    graphics.fillStyle(0x06172a, 1);
+    graphics.fillCircle(36, 36, 34);
+    graphics.fillStyle(0x16c9f4, 0.92);
+    graphics.fillCircle(36, 36, 25);
+    graphics.fillStyle(0x080a0f, 0.95);
+    graphics.fillCircle(36, 36, 15);
+    graphics.lineStyle(4, 0xe8fcff, 0.8);
+    graphics.strokeCircle(36, 36, 31);
+    graphics.generateTexture("blueTunnel", 72, 72);
+
+    graphics.clear();
+    graphics.fillStyle(0x4a5568);
+    graphics.fillRect(8, 10, 32, 28);
+    graphics.fillStyle(0x11161d);
+    graphics.fillRect(15, 17, 18, 14);
+    graphics.fillStyle(0xff326f);
+    graphics.fillRect(20, 0, 8, 16);
+    graphics.fillRect(20, 34, 8, 14);
+    graphics.fillStyle(0xfff36a);
+    graphics.fillRect(19, 22, 10, 5);
+    graphics.generateTexture("trapTurret", 48, 48);
+
+    graphics.clear();
     graphics.fillStyle(0x7213a8);
     graphics.fillRect(12, 16, 120, 64);
     graphics.fillStyle(0xff326f);
@@ -408,6 +484,11 @@ class GameScene extends Phaser.Scene {
       defaultKey: "shieldPickup",
       maxSize: SHIELD_MAX_ACTIVE
     });
+  }
+
+  createCareerTrapElements() {
+    this.mysteryTunnels = this.physics.add.group();
+    this.trapTurrets = this.physics.add.group();
   }
 
   createPortals() {
@@ -494,7 +575,7 @@ class GameScene extends Phaser.Scene {
       fontSize: "21px"
     }).setOrigin(1, 0).setDepth(10);
 
-    this.statsText = this.add.text(GAME_WIDTH - 48, GAME_HEIGHT - 54, "攻速 1.0x  ·  弹道 1  ·  伤害 1", {
+    this.statsText = this.add.text(GAME_WIDTH - 48, GAME_HEIGHT - 54, "攻速 3.0发/秒  ·  弹道 1  ·  伤害 1", {
       ...textStyle,
       fontSize: "15px",
       color: "#9eeaff",
@@ -602,16 +683,16 @@ class GameScene extends Phaser.Scene {
   createCareerScreen() {
     const shade = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x050608, 0.86)
       .setOrigin(0);
-    const panel = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 940, 360, 0x11161d, 1)
+    const panel = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 1060, 540, 0x11161d, 1)
       .setStrokeStyle(3, 0xfff36a, 1);
 
-    this.careerTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 136, "职业升级", {
+    this.careerTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 226, "职业升级", {
       fontFamily: '"Microsoft YaHei", "Courier New", monospace',
       fontSize: "34px",
       color: "#fff36a"
     }).setOrigin(0.5);
 
-    this.careerSubtitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 96, "选择一个后期战斗方向", {
+    this.careerSubtitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 184, "选择一个后期战斗方向", {
       fontFamily: '"Microsoft YaHei", "Courier New", monospace',
       fontSize: "18px",
       color: "#d5e8ef"
@@ -620,6 +701,7 @@ class GameScene extends Phaser.Scene {
     const choices = [
       {
         x: GAME_WIDTH / 2 - 300,
+        y: GAME_HEIGHT / 2 - 70,
         type: "laser",
         title: "激光",
         detail: "射击变为穿透光束，可以同时打穿一条线上的敌人。",
@@ -627,6 +709,7 @@ class GameScene extends Phaser.Scene {
       },
       {
         x: GAME_WIDTH / 2,
+        y: GAME_HEIGHT / 2 - 70,
         type: "gatling",
         title: "加特林",
         detail: "大幅提升射速，并额外增加子弹伤害。",
@@ -634,29 +717,54 @@ class GameScene extends Phaser.Scene {
       },
       {
         x: GAME_WIDTH / 2 + 300,
+        y: GAME_HEIGHT / 2 - 70,
         type: "melee",
         title: "近战",
         detail: "每 2 秒向瞄准方向自动斩击，90 度范围内普通小怪一击必杀。",
         color: 0xff5b86
+      },
+      {
+        x: GAME_WIDTH / 2 - 300,
+        y: GAME_HEIGHT / 2 + 126,
+        type: "mecha",
+        title: "召唤机甲",
+        detail: "呼叫一台从天而降的重型机甲。",
+        color: 0xaeb8c8
+      },
+      {
+        x: GAME_WIDTH / 2,
+        y: GAME_HEIGHT / 2 + 126,
+        type: "chicken",
+        title: "鸡王",
+        detail: "召唤 20 只鸡，获得鸡群的神秘力量。",
+        color: 0xfff36a
+      },
+      {
+        x: GAME_WIDTH / 2 + 300,
+        y: GAME_HEIGHT / 2 + 126,
+        type: "mysteryPortal",
+        title: "神秘传送门",
+        detail: "有可能可以直接通关。",
+        color: 0x70ef8d
       }
     ];
 
     const choiceElements = [];
     choices.forEach((choice) => {
-      const button = this.add.rectangle(choice.x, GAME_HEIGHT / 2 + 28, 250, 150, 0x1b242d, 1)
+      const button = this.add.rectangle(choice.x, choice.y, 270, 150, 0x1b242d, 1)
         .setStrokeStyle(2, choice.color, 1)
         .setInteractive({ useHandCursor: true });
-      const title = this.add.text(choice.x, GAME_HEIGHT / 2 - 18, choice.title, {
+      const title = this.add.text(choice.x, choice.y - 43, choice.title, {
         fontFamily: '"Microsoft YaHei", "Courier New", monospace',
-        fontSize: "24px",
+        fontSize: "22px",
         color: Phaser.Display.Color.IntegerToColor(choice.color).rgba
       }).setOrigin(0.5);
-      const detail = this.add.text(choice.x, GAME_HEIGHT / 2 + 42, choice.detail, {
+      const detail = this.add.text(choice.x, choice.y + 24, choice.detail, {
         fontFamily: '"Microsoft YaHei", "Courier New", monospace',
-        fontSize: "15px",
+        fontSize: "14px",
         color: "#d5e8ef",
         align: "center",
-        wordWrap: { width: 210 }
+        wordWrap: { width: 226 }
       }).setOrigin(0.5);
 
       button.on("pointerover", () => button.setFillStyle(0x273540));
@@ -738,28 +846,29 @@ class GameScene extends Phaser.Scene {
   createEndScreen() {
     const shade = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x050608, 0.8)
       .setOrigin(0);
-    const panel = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 500, 242, 0x11161d, 1)
+    const panel = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 560, 260, 0x11161d, 1)
       .setStrokeStyle(3, 0x16c9f4, 1);
 
-    this.endTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 65, "", {
+    this.endTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 74, "", {
       fontFamily: '"Microsoft YaHei", "Courier New", monospace',
       fontSize: "36px",
       color: "#ff5b86",
       align: "center"
     }).setOrigin(0.5);
 
-    this.endMessage = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 14, "", {
+    this.endMessage = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 16, "", {
       fontFamily: '"Microsoft YaHei", "Courier New", monospace',
       fontSize: "18px",
       color: "#d5e8ef",
-      align: "center"
+      align: "center",
+      wordWrap: { width: 470 }
     }).setOrigin(0.5);
 
-    this.restartButton = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 62, 190, 52, 0x16c9f4, 1)
+    this.restartButton = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 74, 190, 52, 0x16c9f4, 1)
       .setStrokeStyle(2, 0xe8fcff, 1)
       .setInteractive({ useHandCursor: true });
 
-    const restartLabel = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 62, "↻  重新开始", {
+    const restartLabel = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 74, "↻  重新开始", {
       fontFamily: '"Microsoft YaHei", "Courier New", monospace',
       fontSize: "20px",
       color: "#061015"
@@ -834,10 +943,7 @@ class GameScene extends Phaser.Scene {
     if (type === "damage") {
       this.bulletDamage += 1;
     } else if (type === "speed") {
-      this.fireCooldown = Math.max(
-        MIN_FIRE_COOLDOWN_MS,
-        Math.round(this.fireCooldown * 0.82)
-      );
+      this.increaseFireRate();
     } else if (type === "bullets") {
       this.bulletCount += 1;
     } else if (type === "health") {
@@ -911,7 +1017,7 @@ class GameScene extends Phaser.Scene {
 
   updateTouchControlsVisibility() {
     if (!this.touchControlsElement || !this.touchButtons) return;
-    const visible = !this.isPaused && ["playing", "miniboss", "boss"].includes(this.gameState);
+    const visible = !this.isPaused && ["playing", "miniboss", "boss", "mysteryPortal", "turretArena"].includes(this.gameState);
     if (!visible) {
       this.touchUpDown = false;
       this.touchDownDown = false;
@@ -968,6 +1074,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.miniBoss, this.takeDamage, null, this);
     this.physics.add.overlap(this.player, this.shields, this.pickUpShield, null, this);
     this.physics.add.overlap(this.player, this.portals, this.usePortal, null, this);
+    this.physics.add.overlap(this.player, this.mysteryTunnels, this.enterMysteryTunnel, null, this);
     this.physics.add.overlap(
       this.player,
       this.enemyBullets,
@@ -1083,6 +1190,8 @@ class GameScene extends Phaser.Scene {
     this.disableAllBullets();
     this.disableAllEnemyBullets();
     this.disableAllShields();
+    this.disableAllTrapTurrets();
+    this.clearMysteryTunnels();
     this.scheduleNextShieldSpawn(this.time.now);
     if (this.miniBoss.active) this.miniBoss.disableBody(true, true);
     this.enemyHealthGraphics.clear();
@@ -1450,7 +1559,7 @@ class GameScene extends Phaser.Scene {
   updateCrosshair() {
     const pointer = this.input.activePointer;
     this.crosshair.setPosition(pointer.worldX, pointer.worldY);
-    this.crosshair.setVisible(["playing", "miniboss", "boss"].includes(this.gameState));
+    this.crosshair.setVisible(["playing", "miniboss", "boss", "mysteryPortal", "turretArena"].includes(this.gameState));
   }
 
   updateEnemies(time) {
@@ -2204,7 +2313,7 @@ class GameScene extends Phaser.Scene {
   takeEnemyBulletDamage(objectA, objectB) {
     const player = objectA === this.player ? objectA : objectB;
     const bullet = player === objectA ? objectB : objectA;
-    if (!["playing", "miniboss"].includes(this.gameState) || !bullet.active) return;
+    if (!["playing", "miniboss", "turretArena"].includes(this.gameState) || !bullet.active) return;
 
     const sourceX = bullet.x;
     const sourceY = bullet.y;
@@ -2271,7 +2380,11 @@ class GameScene extends Phaser.Scene {
     this.cameras.main.shake(110, 0.006);
 
     if (this.playerHealth <= 0) {
-      this.finishDefeat();
+      if (this.gameState === "turretArena") {
+        this.finishTurretArenaDefeat();
+      } else {
+        this.finishDefeat();
+      }
     }
   }
 
@@ -2287,6 +2400,8 @@ class GameScene extends Phaser.Scene {
     this.disableAllBullets();
     this.disableAllEnemyBullets();
     this.disableAllShields();
+    this.disableAllTrapTurrets();
+    this.clearMysteryTunnels();
     this.enemyHealthGraphics.clear();
     this.player.setVelocity(0, 0);
     this.clearSpawnTimer();
@@ -2363,10 +2478,7 @@ class GameScene extends Phaser.Scene {
     if (this.gameState !== "upgrade") return;
 
     if (type === "speed") {
-      this.fireCooldown = Math.max(
-        MIN_FIRE_COOLDOWN_MS,
-        Math.round(this.fireCooldown * 0.82)
-      );
+      this.increaseFireRate();
     } else if (type === "trajectory") {
       this.bulletCount += 1;
     } else if (type === "damage") {
@@ -2404,6 +2516,11 @@ class GameScene extends Phaser.Scene {
   applyCareer(type) {
     if (this.gameState !== "career" || this.careerClass) return;
 
+    if (this.isTrapCareer(type)) {
+      this.triggerCareerTrap(type);
+      return;
+    }
+
     this.careerClass = type;
     if (type === "gatling") {
       this.fireCooldown = Math.max(
@@ -2418,6 +2535,360 @@ class GameScene extends Phaser.Scene {
     this.updateStatsHud();
     this.careerScreen.setVisible(false);
     this.time.delayedCall(320, () => this.startLevel(this.currentLevel + 1));
+  }
+
+  isTrapCareer(type) {
+    return type === "mecha" || type === "chicken" || type === "mysteryPortal" || type === "builder";
+  }
+
+  triggerCareerTrap(type) {
+    this.careerClass = type;
+    this.gameState = "careerTrap";
+    this.careerScreen.setVisible(false);
+    this.player.setVelocity(0, 0);
+    this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.updateStatsHud();
+    this.updateTouchControlsVisibility();
+    this.syncDebugState();
+
+    if (type === "mecha") {
+      this.triggerMechaCareerEnding();
+    } else if (type === "chicken") {
+      this.triggerChickenCareerEnding();
+    } else {
+      this.triggerMysteryPortalChoice();
+    }
+  }
+
+  triggerMechaCareerEnding() {
+    this.levelText.setText("机甲投送中");
+    this.enemyText.setText("目标  生存");
+
+    const landingX = this.player.x;
+    const landingY = this.player.y;
+    const marker = this.add.circle(landingX, landingY, 54, 0xff326f, 0.18)
+      .setStrokeStyle(4, 0xfff36a, 0.9)
+      .setDepth(18);
+    const mecha = this.add.sprite(landingX, -90, "mecha")
+      .setDepth(23)
+      .setScale(1.25);
+
+    this.tweens.add({
+      targets: marker,
+      scale: 1.35,
+      alpha: 0.45,
+      duration: 180,
+      yoyo: true,
+      repeat: 2
+    });
+
+    this.tweens.add({
+      targets: mecha,
+      y: landingY,
+      duration: 720,
+      ease: "Quad.In",
+      onComplete: () => {
+        marker.destroy();
+        this.player.setVisible(false);
+        this.cameras.main.shake(520, 0.02);
+        this.cameras.main.flash(180, 255, 243, 106);
+        this.time.delayedCall(260, () => {
+          this.finishCareerTrapEnding(
+            "机甲拒绝接入",
+            "机甲从天而降，把你精准砸扁。\n系统评价：你不配使用机甲。"
+          );
+        });
+      }
+    });
+  }
+
+  triggerChickenCareerEnding() {
+    this.levelText.setText("鸡王登基");
+    this.enemyText.setText("目标  不要惹鸡");
+    this.bossWarningText
+      .setText("你误伤了一只鸡，鸡群决定处死你")
+      .setColor("#fff36a")
+      .setVisible(true);
+
+    const chickens = [];
+    for (let index = 0; index < CHICKEN_TRAP_COUNT; index += 1) {
+      const angle = (Math.PI * 2 * index) / CHICKEN_TRAP_COUNT;
+      const radius = 170 + (index % 4) * 24;
+      const chicken = this.add.sprite(
+        this.player.x + Math.cos(angle) * radius,
+        this.player.y + Math.sin(angle) * radius,
+        "chicken"
+      ).setDepth(19).setScale(0.65).setAlpha(0);
+      chickens.push(chicken);
+      this.tweens.add({
+        targets: chicken,
+        alpha: 1,
+        scale: 1,
+        duration: 220 + index * 8,
+        ease: "Back.Out"
+      });
+    }
+
+    this.time.delayedCall(850, () => {
+      const laserGraphics = this.add.graphics().setDepth(22);
+      let hasFinished = false;
+
+      chickens.forEach((chicken, index) => {
+        laserGraphics.lineStyle(5, index % 2 === 0 ? 0xfff36a : 0xffffff, 0.88);
+        laserGraphics.lineBetween(chicken.x, chicken.y, this.player.x, this.player.y);
+        this.tweens.add({
+          targets: chicken,
+          x: this.player.x,
+          y: this.player.y,
+          duration: 430,
+          delay: index * 10,
+          ease: "Quad.In",
+          onComplete: () => {
+            if (hasFinished) return;
+            hasFinished = true;
+            this.player.setVisible(false);
+            this.cameras.main.shake(420, 0.018);
+            this.cameras.main.flash(160, 255, 243, 106);
+            this.time.delayedCall(160, () => {
+              laserGraphics.destroy();
+              chickens.forEach((item) => item.destroy());
+              this.finishCareerTrapEnding(
+                "鸡群审判",
+                "你误伤了一只鸡。\n鸡群认为：王也救不了你。"
+              );
+            });
+          }
+        });
+      });
+    });
+  }
+
+  triggerMysteryPortalChoice() {
+    this.gameState = "mysteryPortal";
+    this.mysteryTunnelLocked = false;
+    this.levelText.setText("神秘传送门");
+    this.enemyText.setText("目标  选择通道");
+    this.bossWarningText
+      .setText("红色洞口 / 蓝色洞口，选一个")
+      .setColor("#d5e8ef")
+      .setVisible(true);
+
+    this.clearMysteryTunnels();
+    this.disableAllTrapTurrets();
+    this.player.setVisible(true);
+    this.player.clearTint();
+    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 165);
+    this.player.setVelocity(0, 0);
+
+    this.createMysteryTunnel(
+      GAME_WIDTH / 2 - 170,
+      GAME_HEIGHT / 2 - 20,
+      "red",
+      "redTunnel",
+      "红色洞口",
+      "回到第一层"
+    );
+    this.createMysteryTunnel(
+      GAME_WIDTH / 2 + 170,
+      GAME_HEIGHT / 2 - 20,
+      "blue",
+      "blueTunnel",
+      "蓝色洞口",
+      "前往未知空间"
+    );
+    this.syncDebugState();
+  }
+
+  createMysteryTunnel(x, y, tunnelType, texture, titleText, detailText) {
+    const tunnel = this.physics.add.sprite(x, y, texture)
+      .setDepth(18)
+      .setScale(1)
+      .setData("tunnelType", tunnelType);
+    tunnel.body.setCircle(MYSTERY_TUNNEL_BODY_RADIUS, 5, 5);
+    tunnel.body.setAllowGravity(false);
+    tunnel.body.setImmovable(true);
+    tunnel.body.moves = false;
+    this.mysteryTunnels.add(tunnel);
+
+    const title = this.add.text(x, y + 54, titleText, {
+      fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+      fontSize: "20px",
+      color: tunnelType === "red" ? "#ff5b86" : "#16c9f4",
+      stroke: "#080a0f",
+      strokeThickness: 4
+    }).setOrigin(0.5).setDepth(19);
+    const detail = this.add.text(x, y + 82, detailText, {
+      fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+      fontSize: "15px",
+      color: "#d5e8ef",
+      stroke: "#080a0f",
+      strokeThickness: 3
+    }).setOrigin(0.5).setDepth(19);
+
+    this.mysteryTunnelLabels.push(title, detail);
+    this.tweens.add({
+      targets: tunnel,
+      angle: 360,
+      duration: 2200,
+      repeat: -1
+    });
+  }
+
+  enterMysteryTunnel(player, tunnel) {
+    if (this.gameState !== "mysteryPortal" || this.mysteryTunnelLocked || !tunnel.active) return;
+
+    this.mysteryTunnelLocked = true;
+    const tunnelType = tunnel.getData("tunnelType");
+    if (tunnelType === "red") {
+      this.enterRedTunnel();
+    } else {
+      this.enterBlueTunnel();
+    }
+  }
+
+  enterRedTunnel() {
+    this.clearMysteryTunnels();
+    this.disableAllTrapTurrets();
+    this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.resetPlayerProgressToInitial();
+    this.gameState = "transition";
+    this.player.setVisible(true);
+    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    this.player.setVelocity(0, 0);
+    this.levelText.setText("第 1 关");
+    this.enemyText.setText("目标  重头开始");
+    this.bossWarningText
+      .setText("你土木学的不到家\n通道挖反了\n重头开始吧")
+      .setColor("#ff5b86")
+      .setVisible(true);
+    this.cameras.main.flash(180, 255, 50, 111);
+    this.cameras.main.shake(260, 0.012);
+    this.syncDebugState();
+
+    this.time.delayedCall(5000, () => {
+      if (this.gameState !== "transition") return;
+      this.bossWarningText.setVisible(false);
+      this.startLevel(1);
+    });
+  }
+
+  enterBlueTunnel() {
+    this.clearMysteryTunnels();
+    this.startTurretArena();
+  }
+
+  resetPlayerProgressToInitial() {
+    this.currentLevel = 1;
+    this.playerMaxHealth = 3;
+    this.playerHealth = 3;
+    this.playerShield = 0;
+    this.fireCooldown = STARTING_FIRE_COOLDOWN_MS;
+    this.bulletCount = 1;
+    this.bulletDamage = 1;
+    this.careerClass = null;
+    this.upgradesChosen = 0;
+    this.lastShotAt = -Infinity;
+    this.lastMeleeSlashAt = -Infinity;
+    this.lastDamageAt = this.time.now - DAMAGE_COOLDOWN_MS;
+    this.updateHealthHud();
+    this.updateStatsHud();
+  }
+
+  startTurretArena() {
+    this.gameState = "turretArena";
+    this.playerShield = 0;
+    this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.disableAllTrapTurrets();
+    this.player.setVisible(true);
+    this.player.clearTint();
+    this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    this.player.setVelocity(0, 0);
+    this.levelText.setText("炮台空间");
+    this.enemyText.setText("目标  活下去");
+    this.bossWarningText
+      .setText("20 个炮台已锁定你")
+      .setColor("#ff5b86")
+      .setVisible(true);
+    this.updateHealthHud();
+    this.updateStatsHud();
+
+    for (let index = 0; index < TURRET_TRAP_COUNT; index += 1) {
+      const angle = (Math.PI * 2 * index) / TURRET_TRAP_COUNT;
+      const x = GAME_WIDTH / 2 + Math.cos(angle) * 455;
+      const y = GAME_HEIGHT / 2 + Math.sin(angle) * 260;
+      const turret = this.physics.add.sprite(x, y, "trapTurret")
+        .setDepth(18)
+        .setScale(1)
+        .setData("lastShotAt", this.time.now - Phaser.Math.Between(0, TURRET_TRAP_SHOT_COOLDOWN_MS));
+      turret.body.setAllowGravity(false);
+      turret.body.setImmovable(true);
+      turret.body.moves = false;
+      turret.rotation = Phaser.Math.Angle.Between(turret.x, turret.y, this.player.x, this.player.y) + Math.PI / 2;
+      this.trapTurrets.add(turret);
+    }
+
+    this.cameras.main.flash(140, 22, 201, 244);
+    this.cameras.main.shake(260, 0.01);
+    this.syncDebugState();
+  }
+
+  updateTurretArena(time) {
+    this.trapTurrets.children.each((turret) => {
+      if (!turret.active) return;
+
+      const angle = Phaser.Math.Angle.Between(turret.x, turret.y, this.player.x, this.player.y);
+      turret.rotation = angle + Math.PI / 2;
+      const lastShotAt = turret.getData("lastShotAt") || 0;
+      if (time - lastShotAt < TURRET_TRAP_SHOT_COOLDOWN_MS) return;
+
+      this.spawnEnemyBullet(
+        turret.x + Math.cos(angle) * 26,
+        turret.y + Math.sin(angle) * 26,
+        angle,
+        TURRET_TRAP_BULLET_SPEED,
+        time
+      );
+      turret.setData("lastShotAt", time);
+    });
+  }
+
+  finishTurretArenaDefeat() {
+    this.gameState = "ended";
+    this.clearSpawnTimer();
+    this.disableAllBullets();
+    this.disableAllEnemyBullets();
+    this.disableAllShields();
+    this.disableAllTrapTurrets();
+    this.clearMysteryTunnels();
+    this.player.setVelocity(0, 0);
+    this.bossWarningText.setVisible(false);
+    this.endTitle.setText("炮台空间");
+    this.endTitle.setColor("#ff5b86");
+    this.endMessage.setText("身法真菜。");
+    this.endScreen.setVisible(true);
+    this.syncDebugState();
+  }
+
+  finishCareerTrapEnding(title, message) {
+    this.gameState = "ended";
+    this.playerHealth = 0;
+    this.updateHealthHud();
+    this.updateStatsHud();
+    this.player.setVelocity(0, 0);
+    this.disableAllTrapTurrets();
+    this.clearMysteryTunnels();
+    this.bossWarningText.setVisible(false);
+    this.endTitle.setText(title);
+    this.endTitle.setColor("#ff5b86");
+    this.endMessage.setText(message);
+    this.endScreen.setVisible(true);
+    this.syncDebugState();
   }
 
   continueToNextLevel() {
@@ -2635,6 +3106,12 @@ class GameScene extends Phaser.Scene {
     debugState.portals = String(
       this.portals ? this.portals.countActive(true) : 0
     );
+    debugState.mysteryTunnels = String(
+      this.mysteryTunnels ? this.mysteryTunnels.countActive(true) : 0
+    );
+    debugState.trapTurrets = String(
+      this.trapTurrets ? this.trapTurrets.countActive(true) : 0
+    );
     debugState.upgradesChosen = String(this.upgradesChosen);
     debugState.careerClass = this.careerClass || "";
     debugState.isPaused = String(this.isPaused);
@@ -2661,20 +3138,44 @@ class GameScene extends Phaser.Scene {
     this.statsText.setText(this.getStatsText());
   }
 
+  getFireRatePerSecond() {
+    return 1000 / this.fireCooldown;
+  }
+
+  getRoundedFireRatePerSecond() {
+    return Math.round(this.getFireRatePerSecond() * 10) / 10;
+  }
+
+  setFireRatePerSecond(ratePerSecond) {
+    this.fireCooldown = Math.max(
+      MIN_FIRE_COOLDOWN_MS,
+      Math.round(1000 / ratePerSecond)
+    );
+  }
+
+  increaseFireRate() {
+    this.setFireRatePerSecond(
+      this.getRoundedFireRatePerSecond() + FIRE_RATE_UPGRADE_PER_SECOND
+    );
+  }
+
   updateHealthHud() {
     this.healthText.setText(`生命  ${Math.max(0, this.playerHealth)} / ${this.playerMaxHealth}`);
     this.syncDebugState();
   }
 
   getStatsText(prefix = "") {
-    const speedMultiplier = STARTING_FIRE_COOLDOWN_MS / this.fireCooldown;
-    return `${prefix}攻速 ${speedMultiplier.toFixed(1)}x  ·  弹道 ${this.bulletCount}  ·  伤害 ${this.bulletDamage}  ·  生命 ${this.playerHealth}/${this.playerMaxHealth}  ·  护盾 ${this.playerShield}/${PLAYER_SHIELD_MAX}  ·  职业 ${this.getCareerName()}`;
+    const fireRate = this.getFireRatePerSecond();
+    return `${prefix}攻速 ${fireRate.toFixed(1)}发/秒  ·  弹道 ${this.bulletCount}  ·  伤害 ${this.bulletDamage}  ·  生命 ${this.playerHealth}/${this.playerMaxHealth}  ·  护盾 ${this.playerShield}/${PLAYER_SHIELD_MAX}  ·  职业 ${this.getCareerName()}`;
   }
 
   getCareerName() {
     if (this.careerClass === "laser") return "激光";
     if (this.careerClass === "gatling") return "加特林";
     if (this.careerClass === "melee") return "近战";
+    if (this.careerClass === "mecha") return "召唤机甲";
+    if (this.careerClass === "chicken") return "鸡王";
+    if (this.careerClass === "mysteryPortal" || this.careerClass === "builder") return "神秘传送门";
     return "未选择";
   }
 
@@ -2697,6 +3198,26 @@ class GameScene extends Phaser.Scene {
     this.shields.children.each((shield) => {
       if (shield.active) shield.disableBody(true, true);
     });
+  }
+
+  clearMysteryTunnels() {
+    if (this.mysteryTunnels) {
+      this.mysteryTunnels.children.each((tunnel) => {
+        if (tunnel.active) tunnel.destroy();
+      });
+      this.mysteryTunnels.clear();
+    }
+    this.mysteryTunnelLabels.forEach((label) => label.destroy());
+    this.mysteryTunnelLabels = [];
+    this.mysteryTunnelLocked = false;
+  }
+
+  disableAllTrapTurrets() {
+    if (!this.trapTurrets) return;
+    this.trapTurrets.children.each((turret) => {
+      if (turret.active) turret.destroy();
+    });
+    this.trapTurrets.clear();
   }
 }
 
