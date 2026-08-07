@@ -58,6 +58,11 @@ const SHIELD_SPAWN_MIN_MS = 7000;
 const SHIELD_SPAWN_MAX_MS = 12000;
 const SHIELD_MAX_ACTIVE = 2;
 const PLAYER_SHIELD_MAX = 1;
+const PORTAL_MARGIN = 76;
+const PORTAL_BODY_RADIUS = 21;
+const PORTAL_BODY_OFFSET = 6;
+const PORTAL_EXIT_OFFSET = 58;
+const PORTAL_COOLDOWN_MS = 700;
 const MINI_BOSS_SCALE = 0.9;
 const MINI_BOSS_BODY_RADIUS = 25;
 const MINI_BOSS_BODY_OFFSET = 7;
@@ -109,6 +114,7 @@ class GameScene extends Phaser.Scene {
     this.touchLeftDown = false;
     this.touchRightDown = false;
     this.nextShieldSpawnAt = 0;
+    this.lastTeleportAt = -Infinity;
 
     this.events.once("shutdown", () => {
       this.clearSpawnTimer();
@@ -122,6 +128,7 @@ class GameScene extends Phaser.Scene {
     this.createEnemies();
     this.createBullets();
     this.createPickups();
+    this.createPortals();
     this.createMiniBossElements();
     this.createHud();
     this.createCrosshair();
@@ -319,6 +326,20 @@ class GameScene extends Phaser.Scene {
     graphics.generateTexture("shieldPickup", 32, 32);
 
     graphics.clear();
+    graphics.lineStyle(4, 0x16c9f4, 1);
+    graphics.strokeCircle(27, 27, 21);
+    graphics.lineStyle(3, 0xa750ff, 1);
+    graphics.strokeCircle(27, 27, 14);
+    graphics.fillStyle(0x16c9f4, 0.5);
+    graphics.fillCircle(27, 27, 8);
+    graphics.fillStyle(0xe8fcff, 0.9);
+    graphics.fillRect(25, 8, 4, 8);
+    graphics.fillRect(25, 38, 4, 8);
+    graphics.fillRect(8, 25, 8, 4);
+    graphics.fillRect(38, 25, 8, 4);
+    graphics.generateTexture("portal", 54, 54);
+
+    graphics.clear();
     graphics.fillStyle(0x7213a8);
     graphics.fillRect(12, 16, 120, 64);
     graphics.fillStyle(0xff326f);
@@ -386,6 +407,48 @@ class GameScene extends Phaser.Scene {
     this.shields = this.physics.add.group({
       defaultKey: "shieldPickup",
       maxSize: SHIELD_MAX_ACTIVE
+    });
+  }
+
+  createPortals() {
+    const left = PORTAL_MARGIN;
+    const right = GAME_WIDTH - PORTAL_MARGIN;
+    const top = PORTAL_MARGIN;
+    const bottom = GAME_HEIGHT - PORTAL_MARGIN;
+    const centerX = GAME_WIDTH / 2;
+    const centerY = GAME_HEIGHT / 2;
+    const positions = [
+      { x: left, y: top },
+      { x: centerX, y: top },
+      { x: right, y: top },
+      { x: right, y: centerY },
+      { x: right, y: bottom },
+      { x: centerX, y: bottom },
+      { x: left, y: bottom },
+      { x: left, y: centerY }
+    ];
+
+    this.portals = this.physics.add.group();
+    this.portalSprites = positions.map((position, index) => {
+      const portal = this.physics.add.sprite(position.x, position.y, "portal");
+      portal.setDepth(2);
+      portal.setAlpha(0.88);
+      portal.body.setCircle(PORTAL_BODY_RADIUS, PORTAL_BODY_OFFSET, PORTAL_BODY_OFFSET);
+      portal.body.setAllowGravity(false);
+      portal.body.setImmovable(true);
+      portal.body.moves = false;
+      portal.setData("index", index);
+      portal.setData("destinationIndex", (index + 4) % positions.length);
+      this.portals.add(portal);
+
+      this.tweens.add({
+        targets: portal,
+        angle: 360,
+        duration: 3600,
+        repeat: -1
+      });
+
+      return portal;
     });
   }
 
@@ -904,6 +967,7 @@ class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.enemies, this.takeDamage, null, this);
     this.physics.add.overlap(this.player, this.miniBoss, this.takeDamage, null, this);
     this.physics.add.overlap(this.player, this.shields, this.pickUpShield, null, this);
+    this.physics.add.overlap(this.player, this.portals, this.usePortal, null, this);
     this.physics.add.overlap(
       this.player,
       this.enemyBullets,
@@ -1309,6 +1373,56 @@ class GameScene extends Phaser.Scene {
       onComplete: () => ring.destroy()
     });
     this.syncDebugState();
+  }
+
+  usePortal(player, portal) {
+    if (!["playing", "miniboss", "boss"].includes(this.gameState) || !portal.active) return;
+
+    const now = this.time.now;
+    if (now - this.lastTeleportAt < PORTAL_COOLDOWN_MS) return;
+
+    const destinationIndex = portal.getData("destinationIndex");
+    const destination = this.portalSprites[destinationIndex];
+    if (!destination) return;
+
+    const exitDirection = new Phaser.Math.Vector2(
+      GAME_WIDTH / 2 - destination.x,
+      GAME_HEIGHT / 2 - destination.y
+    );
+    if (exitDirection.lengthSq() === 0) exitDirection.set(0, 1);
+    exitDirection.normalize();
+
+    const exitX = Phaser.Math.Clamp(
+      destination.x + exitDirection.x * PORTAL_EXIT_OFFSET,
+      42,
+      GAME_WIDTH - 42
+    );
+    const exitY = Phaser.Math.Clamp(
+      destination.y + exitDirection.y * PORTAL_EXIT_OFFSET,
+      42,
+      GAME_HEIGHT - 42
+    );
+
+    this.lastTeleportAt = now;
+    this.showPortalFlash(portal.x, portal.y);
+    player.setPosition(exitX, exitY);
+    player.setVelocity(0, 0);
+    this.showPortalFlash(destination.x, destination.y);
+    this.cameras.main.flash(80, 22, 201, 244);
+    this.syncDebugState();
+  }
+
+  showPortalFlash(x, y) {
+    const flash = this.add.circle(x, y, 22, 0x16c9f4, 0.24)
+      .setStrokeStyle(3, 0xe8fcff, 0.88)
+      .setDepth(18);
+    this.tweens.add({
+      targets: flash,
+      scale: 2.2,
+      alpha: 0,
+      duration: 220,
+      onComplete: () => flash.destroy()
+    });
   }
 
   updatePlayer() {
@@ -2517,6 +2631,9 @@ class GameScene extends Phaser.Scene {
     debugState.playerShield = String(this.playerShield);
     debugState.activeShields = String(
       this.shields ? this.shields.countActive(true) : 0
+    );
+    debugState.portals = String(
+      this.portals ? this.portals.countActive(true) : 0
     );
     debugState.upgradesChosen = String(this.upgradesChosen);
     debugState.careerClass = this.careerClass || "";
