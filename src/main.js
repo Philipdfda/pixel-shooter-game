@@ -348,11 +348,12 @@ class GameScene extends Phaser.Scene {
       fontSize: "21px"
     }).setOrigin(1, 0).setDepth(10);
 
-    this.statsText = this.add.text(48, GAME_HEIGHT - 54, "攻速 1.0x  ·  弹道 1  ·  伤害 1", {
+    this.statsText = this.add.text(GAME_WIDTH - 48, GAME_HEIGHT - 54, "攻速 1.0x  ·  弹道 1  ·  伤害 1", {
       ...textStyle,
-      fontSize: "16px",
-      color: "#9eeaff"
-    }).setDepth(10);
+      fontSize: "15px",
+      color: "#9eeaff",
+      align: "right"
+    }).setOrigin(1, 0).setDepth(10);
   }
 
   createCrosshair() {
