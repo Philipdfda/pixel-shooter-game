@@ -92,6 +92,7 @@ class GameScene extends Phaser.Scene {
 
     this.events.once("shutdown", () => {
       this.clearSpawnTimer();
+      this.destroyCheatKeyListener();
       this.destroyTouchControls();
     });
 
@@ -135,7 +136,6 @@ class GameScene extends Phaser.Scene {
       this.togglePause();
     }
 
-    this.handleCheatKeys();
     this.updateTouchControlsVisibility();
 
     if (this.isPaused) return;
@@ -642,27 +642,45 @@ class GameScene extends Phaser.Scene {
     this.restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.pauseKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
     this.skipKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N);
-    this.cheatDamageKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
-    this.cheatSpeedKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
-    this.cheatBulletsKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.U);
-    this.cheatHealthKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.O);
+    this.createCheatKeyListener();
   }
 
-  handleCheatKeys() {
-    if (["ended", "laser"].includes(this.gameState)) return;
+  createCheatKeyListener() {
+    this.destroyCheatKeyListener();
+    this.cheatKeyHandler = (event) => {
+      if (event.repeat || ["ended", "laser"].includes(this.gameState)) return;
+      if (this.isTypingTarget(event.target)) return;
 
-    if (Phaser.Input.Keyboard.JustDown(this.cheatDamageKey)) {
-      this.applyCheat("damage");
-    }
-    if (Phaser.Input.Keyboard.JustDown(this.cheatSpeedKey)) {
-      this.applyCheat("speed");
-    }
-    if (Phaser.Input.Keyboard.JustDown(this.cheatBulletsKey)) {
-      this.applyCheat("bullets");
-    }
-    if (Phaser.Input.Keyboard.JustDown(this.cheatHealthKey)) {
-      this.applyCheat("health");
-    }
+      const cheatTypeByKey = {
+        y: "damage",
+        i: "speed",
+        u: "bullets",
+        o: "health",
+        keyy: "damage",
+        keyi: "speed",
+        keyu: "bullets",
+        keyo: "health"
+      };
+      const cheatType = cheatTypeByKey[(event.key || "").toLowerCase()] ||
+        cheatTypeByKey[(event.code || "").toLowerCase()];
+      if (!cheatType) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      this.applyCheat(cheatType);
+    };
+    window.addEventListener("keydown", this.cheatKeyHandler);
+  }
+
+  destroyCheatKeyListener() {
+    if (!this.cheatKeyHandler) return;
+    window.removeEventListener("keydown", this.cheatKeyHandler);
+    this.cheatKeyHandler = null;
+  }
+
+  isTypingTarget(target) {
+    if (!target || !target.tagName) return false;
+    return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
   }
 
   applyCheat(type) {
