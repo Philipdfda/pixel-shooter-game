@@ -7,6 +7,7 @@ const SPAWN_INTERVAL_MS = 500;
 const BOSS_LASER_DELAY_MS = 5000;
 const FINAL_BOSS_MAX_HEALTH = 999;
 const MAX_UPGRADES = 5;
+const CAREER_UNLOCK_LEVEL = 5;
 const MINI_BOSS_LEVELS = {
   4: { type: "melee", name: "突击执行者", health: 60, speed: 105 },
   6: { type: "ranged", name: "弹幕控制者", health: 100, speed: 62 }
@@ -46,6 +47,14 @@ const STARTING_FIRE_COOLDOWN_MS = 220;
 const MIN_FIRE_COOLDOWN_MS = 70;
 const DAMAGE_COOLDOWN_MS = 900;
 const ENEMY_MAX_HEALTH = 3;
+const LASER_DAMAGE_BONUS = 1;
+const LASER_WIDTH = 24;
+const GATLING_FIRE_RATE_MULTIPLIER = 0.55;
+const GATLING_DAMAGE_BONUS = 2;
+const MELEE_SLASH_COOLDOWN_MS = 2000;
+const MELEE_SLASH_RANGE = 150;
+const MELEE_SLASH_ARC = Math.PI / 2;
+const MELEE_SLASH_DAMAGE = 12;
 
 class GameScene extends Phaser.Scene {
   constructor() {
@@ -59,8 +68,10 @@ class GameScene extends Phaser.Scene {
     this.fireCooldown = STARTING_FIRE_COOLDOWN_MS;
     this.bulletCount = 1;
     this.bulletDamage = 1;
+    this.careerClass = null;
     this.upgradesChosen = 0;
     this.lastShotAt = -Infinity;
+    this.lastMeleeSlashAt = -Infinity;
     this.lastDamageAt = -DAMAGE_COOLDOWN_MS;
     this.gameState = "playing";
     this.spawnTimer = null;
@@ -93,6 +104,7 @@ class GameScene extends Phaser.Scene {
     this.createHud();
     this.createCrosshair();
     this.createUpgradeScreen();
+    this.createCareerScreen();
     this.createBossSequenceElements();
     this.createPauseScreen();
     this.createEndScreen();
@@ -123,6 +135,7 @@ class GameScene extends Phaser.Scene {
       this.togglePause();
     }
 
+    this.handleCheatKeys();
     this.updateTouchControlsVisibility();
 
     if (this.isPaused) return;
@@ -145,6 +158,7 @@ class GameScene extends Phaser.Scene {
     if (!this.isTouchMovePressed()) {
       this.updateAiming();
     }
+    this.updateCareerSkill(time);
     this.recycleOldBullets(time);
 
     if (this.gameState === "playing") {
@@ -438,6 +452,81 @@ class GameScene extends Phaser.Scene {
     ]).setDepth(25).setVisible(false);
   }
 
+  createCareerScreen() {
+    const shade = this.add.rectangle(0, 0, GAME_WIDTH, GAME_HEIGHT, 0x050608, 0.86)
+      .setOrigin(0);
+    const panel = this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, 940, 360, 0x11161d, 1)
+      .setStrokeStyle(3, 0xfff36a, 1);
+
+    this.careerTitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 136, "职业升级", {
+      fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+      fontSize: "34px",
+      color: "#fff36a"
+    }).setOrigin(0.5);
+
+    this.careerSubtitle = this.add.text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 96, "选择一个后期战斗方向", {
+      fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+      fontSize: "18px",
+      color: "#d5e8ef"
+    }).setOrigin(0.5);
+
+    const choices = [
+      {
+        x: GAME_WIDTH / 2 - 300,
+        type: "laser",
+        title: "激光",
+        detail: "射击变为穿透光束，可以同时打穿一条线上的敌人。",
+        color: 0x16c9f4
+      },
+      {
+        x: GAME_WIDTH / 2,
+        type: "gatling",
+        title: "加特林",
+        detail: "大幅提升射速，并额外增加子弹伤害。",
+        color: 0xfff36a
+      },
+      {
+        x: GAME_WIDTH / 2 + 300,
+        type: "melee",
+        title: "近战",
+        detail: "每 2 秒向瞄准方向自动斩击，90 度范围内普通小怪一击必杀。",
+        color: 0xff5b86
+      }
+    ];
+
+    const choiceElements = [];
+    choices.forEach((choice) => {
+      const button = this.add.rectangle(choice.x, GAME_HEIGHT / 2 + 28, 250, 150, 0x1b242d, 1)
+        .setStrokeStyle(2, choice.color, 1)
+        .setInteractive({ useHandCursor: true });
+      const title = this.add.text(choice.x, GAME_HEIGHT / 2 - 18, choice.title, {
+        fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+        fontSize: "24px",
+        color: Phaser.Display.Color.IntegerToColor(choice.color).rgba
+      }).setOrigin(0.5);
+      const detail = this.add.text(choice.x, GAME_HEIGHT / 2 + 42, choice.detail, {
+        fontFamily: '"Microsoft YaHei", "Courier New", monospace',
+        fontSize: "15px",
+        color: "#d5e8ef",
+        align: "center",
+        wordWrap: { width: 210 }
+      }).setOrigin(0.5);
+
+      button.on("pointerover", () => button.setFillStyle(0x273540));
+      button.on("pointerout", () => button.setFillStyle(0x1b242d));
+      button.on("pointerdown", () => this.applyCareer(choice.type));
+      choiceElements.push(button, title, detail);
+    });
+
+    this.careerScreen = this.add.container(0, 0, [
+      shade,
+      panel,
+      this.careerTitle,
+      this.careerSubtitle,
+      ...choiceElements
+    ]).setDepth(26).setVisible(false);
+  }
+
   createBossSequenceElements() {
     this.boss = this.physics.add.sprite(GAME_WIDTH / 2, 178, "boss")
       .setDepth(12)
@@ -553,6 +642,50 @@ class GameScene extends Phaser.Scene {
     this.restartKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.pauseKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
     this.skipKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.N);
+    this.cheatDamageKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
+    this.cheatSpeedKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
+    this.cheatBulletsKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.U);
+    this.cheatHealthKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.O);
+  }
+
+  handleCheatKeys() {
+    if (["ended", "laser"].includes(this.gameState)) return;
+
+    if (Phaser.Input.Keyboard.JustDown(this.cheatDamageKey)) {
+      this.applyCheat("damage");
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.cheatSpeedKey)) {
+      this.applyCheat("speed");
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.cheatBulletsKey)) {
+      this.applyCheat("bullets");
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.cheatHealthKey)) {
+      this.applyCheat("health");
+    }
+  }
+
+  applyCheat(type) {
+    if (type === "damage") {
+      this.bulletDamage += 1;
+    } else if (type === "speed") {
+      this.fireCooldown = Math.max(
+        MIN_FIRE_COOLDOWN_MS,
+        Math.round(this.fireCooldown * 0.82)
+      );
+    } else if (type === "bullets") {
+      this.bulletCount += 1;
+    } else if (type === "health") {
+      this.playerMaxHealth += 1;
+      this.playerHealth += 1;
+    }
+
+    this.updateHealthHud();
+    this.updateStatsHud();
+    if (this.gameState === "upgrade") {
+      this.upgradeCurrentText.setText(this.getStatsText("当前："));
+    }
+    this.syncDebugState();
   }
 
   createTouchControls() {
@@ -786,6 +919,7 @@ class GameScene extends Phaser.Scene {
     this.miniBossHealthGraphics.clear();
     this.miniBossNameText.setVisible(false);
     this.upgradeScreen.setVisible(false);
+    this.careerScreen.setVisible(false);
 
     this.levelText.setText(`关卡  ${this.currentLevel} / 8`);
     this.updateHealthHud();
@@ -1224,6 +1358,13 @@ class GameScene extends Phaser.Scene {
       pointer.worldX,
       pointer.worldY
     );
+
+    if (this.careerClass === "laser") {
+      this.fireLaser(time, angle);
+      this.lastShotAt = time;
+      return;
+    }
+
     const perpendicular = angle + Math.PI / 2;
 
     for (let index = 0; index < this.bulletCount; index += 1) {
@@ -1248,6 +1389,147 @@ class GameScene extends Phaser.Scene {
     this.lastShotAt = time;
   }
 
+  fireLaser(time, angle) {
+    const startX = this.player.x + Math.cos(angle) * 18;
+    const startY = this.player.y + Math.sin(angle) * 18;
+    const laserLength = Math.max(GAME_WIDTH, GAME_HEIGHT) * 1.6;
+    const endX = startX + Math.cos(angle) * laserLength;
+    const endY = startY + Math.sin(angle) * laserLength;
+    const damage = this.bulletDamage + LASER_DAMAGE_BONUS;
+
+    const beam = this.add.graphics().setDepth(16);
+    beam.lineStyle(LASER_WIDTH + 8, 0x16c9f4, 0.24);
+    beam.lineBetween(startX, startY, endX, endY);
+    beam.lineStyle(5, 0xe8fcff, 0.9);
+    beam.lineBetween(startX, startY, endX, endY);
+    this.tweens.add({
+      targets: beam,
+      alpha: 0,
+      duration: 120,
+      onComplete: () => beam.destroy()
+    });
+
+    this.enemies.children.each((enemy) => {
+      if (
+        enemy.active &&
+        this.distanceToSegment(enemy.x, enemy.y, startX, startY, endX, endY) <= LASER_WIDTH
+      ) {
+        this.damageEnemy(enemy, damage);
+      }
+    });
+
+    if (
+      this.gameState === "miniboss" &&
+      this.miniBoss.active &&
+      this.distanceToSegment(this.miniBoss.x, this.miniBoss.y, startX, startY, endX, endY) <= LASER_WIDTH + 18
+    ) {
+      this.damageMiniBoss(damage);
+    }
+
+    if (
+      this.gameState === "boss" &&
+      this.boss.active &&
+      this.distanceToSegment(this.boss.x, this.boss.y, startX, startY, endX, endY) <= LASER_WIDTH + 52
+    ) {
+      this.damageFinalBoss(damage);
+    }
+
+    this.updateEnemyHealthBars();
+    this.checkLevelComplete();
+  }
+
+  updateCareerSkill(time) {
+    if (
+      this.careerClass !== "melee" ||
+      !["playing", "miniboss", "boss"].includes(this.gameState) ||
+      time - this.lastMeleeSlashAt < MELEE_SLASH_COOLDOWN_MS
+    ) {
+      return;
+    }
+
+    this.lastMeleeSlashAt = time;
+    this.performMeleeSlash();
+  }
+
+  performMeleeSlash() {
+    const centerAngle = this.player.rotation - Math.PI / 2;
+    const halfArc = MELEE_SLASH_ARC / 2;
+    const originX = this.player.x;
+    const originY = this.player.y;
+
+    const slash = this.add.graphics().setDepth(17);
+    slash.fillStyle(0xfff36a, 0.24);
+    slash.lineStyle(3, 0xffffff, 0.82);
+    slash.beginPath();
+    slash.moveTo(originX, originY);
+    for (let step = 0; step <= 10; step += 1) {
+      const angle = centerAngle - halfArc + (MELEE_SLASH_ARC * step) / 10;
+      slash.lineTo(
+        originX + Math.cos(angle) * MELEE_SLASH_RANGE,
+        originY + Math.sin(angle) * MELEE_SLASH_RANGE
+      );
+    }
+    slash.closePath();
+    slash.fillPath();
+    slash.strokePath();
+    this.tweens.add({
+      targets: slash,
+      alpha: 0,
+      duration: 180,
+      onComplete: () => slash.destroy()
+    });
+
+    this.enemies.children.each((enemy) => {
+      if (enemy.active && this.isPointInSlash(enemy.x, enemy.y, originX, originY, centerAngle)) {
+        this.damageEnemy(enemy, MELEE_SLASH_DAMAGE);
+      }
+    });
+
+    if (
+      this.gameState === "miniboss" &&
+      this.miniBoss.active &&
+      this.isPointInSlash(this.miniBoss.x, this.miniBoss.y, originX, originY, centerAngle, 30)
+    ) {
+      this.damageMiniBoss(MELEE_SLASH_DAMAGE);
+    }
+
+    if (
+      this.gameState === "boss" &&
+      this.boss.active &&
+      this.isPointInSlash(this.boss.x, this.boss.y, originX, originY, centerAngle, 62)
+    ) {
+      this.damageFinalBoss(MELEE_SLASH_DAMAGE);
+    }
+
+    this.cameras.main.shake(80, 0.003);
+    this.updateEnemyHealthBars();
+    this.checkLevelComplete();
+  }
+
+  isPointInSlash(targetX, targetY, originX, originY, centerAngle, extraRange = 0) {
+    const distance = Phaser.Math.Distance.Between(originX, originY, targetX, targetY);
+    if (distance > MELEE_SLASH_RANGE + extraRange) return false;
+
+    const angle = Phaser.Math.Angle.Between(originX, originY, targetX, targetY);
+    return Math.abs(Phaser.Math.Angle.Wrap(angle - centerAngle)) <= MELEE_SLASH_ARC / 2;
+  }
+
+  distanceToSegment(pointX, pointY, startX, startY, endX, endY) {
+    const deltaX = endX - startX;
+    const deltaY = endY - startY;
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+    if (lengthSquared === 0) return Phaser.Math.Distance.Between(pointX, pointY, startX, startY);
+
+    const t = Phaser.Math.Clamp(
+      ((pointX - startX) * deltaX + (pointY - startY) * deltaY) / lengthSquared,
+      0,
+      1
+    );
+    const closestX = startX + t * deltaX;
+    const closestY = startY + t * deltaY;
+    return Phaser.Math.Distance.Between(pointX, pointY, closestX, closestY);
+  }
+
   recycleOldBullets(time) {
     this.bullets.children.each((bullet) => {
       if (!bullet.active) return;
@@ -1267,7 +1549,15 @@ class GameScene extends Phaser.Scene {
     if (this.gameState !== "playing" || !bullet.active || !enemy.active) return;
 
     bullet.disableBody(true, true);
-    const nextHealth = enemy.getData("health") - bullet.getData("damage");
+    this.damageEnemy(enemy, bullet.getData("damage") || 1);
+    this.updateEnemyHealthBars();
+    this.checkLevelComplete();
+  }
+
+  damageEnemy(enemy, damage) {
+    if (!enemy.active) return;
+
+    const nextHealth = enemy.getData("health") - damage;
     enemy.setData("health", nextHealth);
 
     enemy.setTintFill(0xffffff);
@@ -1279,10 +1569,7 @@ class GameScene extends Phaser.Scene {
       enemy.disableBody(true, true);
       this.defeatedEnemies += 1;
       this.updateTargetHud();
-      this.checkLevelComplete();
     }
-
-    this.updateEnemyHealthBars();
   }
 
   hitMiniBoss(objectA, objectB) {
@@ -1291,11 +1578,17 @@ class GameScene extends Phaser.Scene {
     if (this.gameState !== "miniboss" || !bullet.active || !miniBoss.active) return;
 
     bullet.disableBody(true, true);
-    const nextHealth = miniBoss.getData("health") - (bullet.getData("damage") || 1);
-    miniBoss.setData("health", nextHealth);
-    miniBoss.setTintFill(0xffffff);
+    this.damageMiniBoss(bullet.getData("damage") || 1);
+  }
+
+  damageMiniBoss(damage) {
+    if (this.gameState !== "miniboss" || !this.miniBoss.active) return;
+
+    const nextHealth = this.miniBoss.getData("health") - damage;
+    this.miniBoss.setData("health", nextHealth);
+    this.miniBoss.setTintFill(0xffffff);
     this.time.delayedCall(70, () => {
-      if (miniBoss.active && !miniBoss.getData("berserk")) miniBoss.clearTint();
+      if (this.miniBoss.active && !this.miniBoss.getData("berserk")) this.miniBoss.clearTint();
     });
 
     if (this.handleMiniBossHealthTriggers(nextHealth)) return;
@@ -1499,10 +1792,16 @@ class GameScene extends Phaser.Scene {
     if (this.gameState !== "boss" || !bullet.active || !boss.active) return;
 
     bullet.disableBody(true, true);
-    this.finalBossHealth -= bullet.getData("damage");
-    boss.setTintFill(0xffffff);
+    this.damageFinalBoss(bullet.getData("damage") || 1);
+  }
+
+  damageFinalBoss(damage) {
+    if (this.gameState !== "boss" || !this.boss.active) return;
+
+    this.finalBossHealth -= damage;
+    this.boss.setTintFill(0xffffff);
     this.time.delayedCall(55, () => {
-      if (boss.active) boss.clearTint();
+      if (this.boss.active) this.boss.clearTint();
     });
 
     this.enemyText.setText(`目标  ${Math.max(0, this.finalBossHealth)}`);
@@ -1627,6 +1926,8 @@ class GameScene extends Phaser.Scene {
       this.upgradesChosen < MAX_UPGRADES
     ) {
       this.showUpgradeScreen();
+    } else if (this.shouldShowCareerUpgrade()) {
+      this.showCareerScreen();
     } else {
       this.continueToNextLevel();
     }
@@ -1661,7 +1962,44 @@ class GameScene extends Phaser.Scene {
     this.updateHealthHud();
     this.updateStatsHud();
     this.upgradeScreen.setVisible(false);
-    this.time.delayedCall(260, () => this.startLevel(this.currentLevel + 1));
+    this.time.delayedCall(260, () => {
+      if (this.shouldShowCareerUpgrade()) {
+        this.showCareerScreen();
+      } else {
+        this.startLevel(this.currentLevel + 1);
+      }
+    });
+  }
+
+  shouldShowCareerUpgrade() {
+    return this.currentLevel === CAREER_UNLOCK_LEVEL && !this.careerClass;
+  }
+
+  showCareerScreen() {
+    this.gameState = "career";
+    this.player.setVelocity(0, 0);
+    this.careerScreen.setVisible(true);
+    this.updateTouchControlsVisibility();
+    this.syncDebugState();
+  }
+
+  applyCareer(type) {
+    if (this.gameState !== "career" || this.careerClass) return;
+
+    this.careerClass = type;
+    if (type === "gatling") {
+      this.fireCooldown = Math.max(
+        MIN_FIRE_COOLDOWN_MS,
+        Math.round(this.fireCooldown * GATLING_FIRE_RATE_MULTIPLIER)
+      );
+      this.bulletDamage += GATLING_DAMAGE_BONUS;
+    } else if (type === "melee") {
+      this.lastMeleeSlashAt = this.time.now;
+    }
+
+    this.updateStatsHud();
+    this.careerScreen.setVisible(false);
+    this.time.delayedCall(320, () => this.startLevel(this.currentLevel + 1));
   }
 
   continueToNextLevel() {
@@ -1869,6 +2207,7 @@ class GameScene extends Phaser.Scene {
       this.enemyBullets ? this.enemyBullets.countActive(true) : 0
     );
     debugState.upgradesChosen = String(this.upgradesChosen);
+    debugState.careerClass = this.careerClass || "";
     debugState.isPaused = String(this.isPaused);
     debugState.bossFrozen = String(this.bossFrozen);
     debugState.finalBossActive = String(Boolean(this.boss && this.boss.active));
@@ -1900,7 +2239,14 @@ class GameScene extends Phaser.Scene {
 
   getStatsText(prefix = "") {
     const speedMultiplier = STARTING_FIRE_COOLDOWN_MS / this.fireCooldown;
-    return `${prefix}攻速 ${speedMultiplier.toFixed(1)}x  ·  弹道 ${this.bulletCount}  ·  伤害 ${this.bulletDamage}  ·  生命 ${this.playerHealth}/${this.playerMaxHealth}`;
+    return `${prefix}攻速 ${speedMultiplier.toFixed(1)}x  ·  弹道 ${this.bulletCount}  ·  伤害 ${this.bulletDamage}  ·  生命 ${this.playerHealth}/${this.playerMaxHealth}  ·  职业 ${this.getCareerName()}`;
+  }
+
+  getCareerName() {
+    if (this.careerClass === "laser") return "激光";
+    if (this.careerClass === "gatling") return "加特林";
+    if (this.careerClass === "melee") return "近战";
+    return "未选择";
   }
 
   disableAllBullets() {
